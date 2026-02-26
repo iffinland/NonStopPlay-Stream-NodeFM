@@ -1,7 +1,5 @@
 import { useEffect } from 'react';
 import { To, useNavigate } from 'react-router-dom';
-import { EnumTheme, themeAtom } from '../state/global/system';
-import { useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { supportedLanguages } from '../i18n/i18n';
 
@@ -15,16 +13,15 @@ interface CustomWindow extends Window {
 const customWindow = window as unknown as CustomWindow;
 
 export const useIframe = () => {
-  const setTheme = useSetAtom(themeAtom);
   const { i18n } = useTranslation();
 
   const navigate = useNavigate();
   useEffect(() => {
     const themeColorDefault = customWindow?._qdnTheme;
     if (themeColorDefault === 'dark') {
-      setTheme(EnumTheme.DARK);
+      document.documentElement.dataset.theme = 'dark';
     } else if (themeColorDefault === 'light') {
-      setTheme(EnumTheme.LIGHT);
+      document.documentElement.dataset.theme = 'light';
     }
 
     const languageDefault = customWindow?._qdnLang;
@@ -52,9 +49,9 @@ export const useIframe = () => {
       } else if (event.data?.action === 'THEME_CHANGED' && event.data.theme) {
         const themeColor = event.data.theme;
         if (themeColor === 'dark') {
-          setTheme(EnumTheme.DARK);
+          document.documentElement.dataset.theme = 'dark';
         } else if (themeColor === 'light') {
-          setTheme(EnumTheme.LIGHT);
+          document.documentElement.dataset.theme = 'light';
         }
       } else if (
         event.data?.action === 'LANGUAGE_CHANGED' &&
@@ -70,6 +67,6 @@ export const useIframe = () => {
     return () => {
       window.removeEventListener('message', handleNavigation);
     };
-  }, [navigate, setTheme]);
+  }, [navigate, i18n]);
   return { navigate };
 };

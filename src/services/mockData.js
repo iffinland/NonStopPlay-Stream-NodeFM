@@ -5,19 +5,19 @@ export const RADIO_SCHEDULE = {
       title: 'Quantum Beats',
       artist: 'NodeFM Resident',
       duration: 300,
-      url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+      url: '/arbitrary/AUDIO/nodefm/nodefm-demo-track-1',
     },
     {
       title: 'Block Lattice',
       artist: 'Satoshi',
       duration: 240,
-      url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+      url: '/arbitrary/AUDIO/nodefm/nodefm-demo-track-2',
     },
     {
       title: 'Mesh Frequency',
       artist: 'QNode Collective',
       duration: 210,
-      url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
+      url: '/arbitrary/AUDIO/nodefm/nodefm-demo-track-3',
     },
   ],
 };

@@ -1,28 +1,25 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { createAvatarLink, useGlobal } from 'qapp-core';
 import { useNavigate } from 'react-router-dom';
 import { createNodeFmRuntime } from './nodefmRuntime';
+import { useQortalAuth } from './hooks/useQortalAuth';
 import './style.css';
 
 function App() {
   const runtimeRef = useRef<ReturnType<typeof createNodeFmRuntime> | null>(null);
-  const { auth } = useGlobal();
+  const { auth } = useQortalAuth();
   const navigate = useNavigate();
 
   const userProfile = useMemo(() => {
-    const name = auth?.name || 'Loading user...';
-    const address = auth?.address || '';
-    const avatarUrl = auth?.name
-      ? createAvatarLink(auth.name)
-      : auth?.avatarUrl ||
-        `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(name.slice(0, 2))}`;
+    const name = auth.name || 'Loading user...';
+    const address = auth.address || '';
+    const avatarUrl = auth.avatarUrl || '/nodefm_logo.png';
 
     return {
       name,
       address,
       avatarUrl,
     };
-  }, [auth?.name, auth?.address, auth?.avatarUrl]);
+  }, [auth.name, auth.address, auth.avatarUrl]);
 
   useEffect(() => {
     const runtime = createNodeFmRuntime();

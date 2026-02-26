@@ -1,6 +1,8 @@
 import {
+  ensureQdnResourceReady,
   fetchPublishedAudioTracks,
   fetchPublishedPlaylists,
+  parseQdnResourceFromUrl,
   fetchQdnStats,
   fetchSchedule,
   publishPlaylistToQdn,
@@ -71,6 +73,9 @@ export function createNodeFmRuntime() {
   let selectedPlaylistId = '';
   let tickIntervalId = null;
   let isBootstrapped = false;
+  let activeTracksRef = null;
+  let renderedUpcomingForTrackIndex = -1;
+  let isSwitchingTrack = false;
 
   const adminPanel = new AdminPanel(
     {
@@ -264,6 +269,29 @@ export function createNodeFmRuntime() {
     ui.status.style.color = isError ? '#ff8fa3' : '';
   }
 
+  function getResourceStatusLabel(status, progress, localChunkCount, totalChunkCount) {
+    const suffix =
+      totalChunkCount > 0 ? ` (${progress}% • ${localChunkCount}/${totalChunkCount} chunks)` : '';
+
+    if (status === 'READY') {
+      return 'QDN resource READY.';
+    }
+
+    if (status === 'DOWNLOADING') {
+      return `QDN downloading${suffix}`;
+    }
+
+    if (status === 'DOWNLOADED' || status === 'BUILDING') {
+      return `QDN building resource${suffix}`;
+    }
+
+    if (status === 'PUBLISHED' || status === 'MISSING_DATA') {
+      return `QDN preparing resource${suffix}`;
+    }
+
+    return `QDN status: ${status}${suffix}`;
+  }
+
   function refreshPlaylistDropdown(forcedSelectedId = '') {
     const selectedId = forcedSelectedId || selectedPlaylistId || '';
     adminPanel.setSavedPlaylists(qdnPlaylists, selectedId);
@@ -356,6 +384,15 @@ export function createNodeFmRuntime() {
     }
 
     try {
+      const qdnResource = parseQdnResourceFromUrl(syncResult.currentTrack.url);
+      if (qdnResource) {
+        await ensureQdnResourceReady(qdnResource, {
+          onStatus: ({ status, progress, localChunkCount, totalChunkCount }) => {
+            updateStatus(getResourceStatusLabel(status, progress, localChunkCount, totalChunkCount));
+          },
+        });
+      }
+
       await audioPlayer.playTrack(syncResult.currentTrack.url, syncResult.offset);
       isTunedIn = true;
       activeTrackIndex = syncResult.trackIndex;
@@ -399,8 +436,14 @@ export function createNodeFmRuntime() {
       if (ui.elapsed) ui.elapsed.textContent = '00:00';
       if (ui.total) ui.total.textContent = '00:00';
       if (ui.progress) ui.progress.style.width = '0%';
-      upcomingPanel.render([]);
-      adminPanel.setCurrentTracks([]);
+      if (renderedUpcomingForTrackIndex !== -1) {
+        upcomingPanel.render([]);
+        renderedUpcomingForTrackIndex = -1;
+      }
+      if (activeTracksRef !== null) {
+        adminPanel.setCurrentTracks([]);
+        activeTracksRef = null;
+      }
       return;
     }
 
@@ -415,10 +458,16 @@ export function createNodeFmRuntime() {
     if (ui.progress) ui.progress.style.width = `${progressPercent}%`;
 
     const tracks = scheduleData?.tracks || [];
-    const upcomingTracks = getUpcomingTracks(tracks, syncResult.trackIndex, 3);
-    upcomingPanel.render(upcomingTracks);
-    adminPanel.setCurrentTracks(tracks);
-    updateAdminStats();
+    if (syncResult.trackIndex !== renderedUpcomingForTrackIndex) {
+      const upcomingTracks = getUpcomingTracks(tracks, syncResult.trackIndex, 3);
+      upcomingPanel.render(upcomingTracks);
+      renderedUpcomingForTrackIndex = syncResult.trackIndex;
+    }
+
+    if (tracks !== activeTracksRef) {
+      adminPanel.setCurrentTracks(tracks);
+      activeTracksRef = tracks;
+    }
   }
 
   async function tick() {
@@ -429,12 +478,25 @@ export function createNodeFmRuntime() {
     const syncResult = scheduler.sync(scheduleData);
     render(syncResult);
 
-    if (isTunedIn && syncResult.trackIndex !== activeTrackIndex) {
+    if (isTunedIn && syncResult.trackIndex !== activeTrackIndex && !isSwitchingTrack) {
+      isSwitchingTrack = true;
       try {
+        const qdnResource = parseQdnResourceFromUrl(syncResult.currentTrack.url);
+        if (qdnResource) {
+          await ensureQdnResourceReady(qdnResource, {
+            onStatus: ({ status, progress, localChunkCount, totalChunkCount }) => {
+              updateStatus(getResourceStatusLabel(status, progress, localChunkCount, totalChunkCount));
+            },
+          });
+        }
+
         await audioPlayer.playTrack(syncResult.currentTrack.url, syncResult.offset);
         activeTrackIndex = syncResult.trackIndex;
+        updateStatus('Live stream is active.');
       } catch (error) {
         updateStatus(`Track switch error: ${error.message}`, true);
+      } finally {
+        isSwitchingTrack = false;
       }
     }
   }
@@ -455,6 +517,7 @@ export function createNodeFmRuntime() {
       await refreshQdnPlaylists();
       await refreshPublishedAudio();
       adminPanel.setCurrentTracks(scheduleData.tracks || []);
+      activeTracksRef = scheduleData?.tracks || null;
       updateAdminStats(qdnStats?.totalDuration || 0);
 
       const firstSync = scheduler.sync(scheduleData);

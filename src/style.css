@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
 :root {
   --bg-primary: #07090d;
   --bg-secondary: #111521;
@@ -155,6 +153,7 @@ body {
     0 0 0 1px rgba(0, 210, 255, 0.08),
     0 18px 40px rgba(0, 0, 0, 0.45),
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  contain: content;
 }
 
 .player-header h1 {
@@ -347,6 +346,7 @@ body {
   box-shadow:
     0 0 0 1px rgba(0, 210, 255, 0.05),
     0 14px 34px rgba(0, 0, 0, 0.35);
+  contain: content;
 }
 
 .upcoming-header h3,
@@ -755,6 +755,10 @@ body {
 }
 
 @media (max-width: 600px) {
+  body {
+    padding: 10px;
+  }
+
   .session-controls {
     width: 100%;
     justify-content: stretch;
@@ -788,5 +792,24 @@ body {
 
   .admin-modal-actions {
     grid-template-columns: 1fr;
+  }
+
+  .player-card,
+  .upcoming-card,
+  .admin-panel,
+  .sidebar-shell {
+    box-shadow: none;
+  }
+
+  .dot {
+    animation-duration: 2.2s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot,
+  .progress-fill {
+    animation: none !important;
+    transition: none !important;
   }
 }

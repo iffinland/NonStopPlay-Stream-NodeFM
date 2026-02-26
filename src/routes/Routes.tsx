@@ -1,7 +1,9 @@
+import { Suspense, lazy } from 'react';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import App from '../App';
-import { AppWrapper } from '../AppWrapper';
-import AdminPage from '../pages/AdminPage';
+import Layout from '../styles/Layout';
+
+const AdminPage = lazy(() => import('../pages/AdminPage'));
 
 interface CustomWindow extends Window {
   _qdnBase: string;
@@ -13,7 +15,7 @@ const router = createBrowserRouter(
   [
     {
       path: '/',
-      element: <AppWrapper />,
+      element: <Layout />,
       children: [
         {
           index: true,
@@ -21,7 +23,11 @@ const router = createBrowserRouter(
         },
         {
           path: 'admin',
-          element: <AdminPage />,
+          element: (
+            <Suspense fallback={<div style={{ padding: '16px' }}>Loading admin...</div>}>
+              <AdminPage />
+            </Suspense>
+          ),
         },
       ],
     },

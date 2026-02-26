@@ -14,6 +14,12 @@ const VERIFY_RETRIES = 5;
 const VERIFY_DELAY_MS = 1500;
 const PLAYLIST_SEARCH_LIMIT = 60;
 const AUDIO_SEARCH_LIMIT = 100;
+const RESOURCE_READY_TIMEOUT_MS = 2 * 60 * 1000;
+const RESOURCE_STATUS_POLL_MS = 1500;
+const METADATA_FETCH_CONCURRENCY = 6;
+const METADATA_CACHE_TTL_MS = 60 * 1000;
+
+const metadataCache = new Map();
 
 const createResourceId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -41,6 +47,25 @@ const sleep = async (durationMs) => {
   await new Promise((resolve) => {
     setTimeout(resolve, durationMs);
   });
+};
+
+const makeMetadataCacheKey = (service, name, identifier) => {
+  return `${service}:${name}:${identifier}`;
+};
+
+const mapWithConcurrency = async (items, limit, mapper) => {
+  const result = [];
+  const queue = [...items];
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (queue.length) {
+      const item = queue.shift();
+      const mapped = await mapper(item);
+      result.push(mapped);
+    }
+  });
+
+  await Promise.all(workers);
+  return result;
 };
 
 const encodeBase64Json = (value) => {
@@ -176,6 +201,29 @@ const parseMetadataPayload = (raw) => {
   return parsed;
 };
 
+const fetchMetadataResource = async (service, name, identifier) => {
+  const cacheKey = makeMetadataCacheKey(service, name, identifier);
+  const cached = metadataCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const raw = await requestQortal({
+    action: 'FETCH_QDN_RESOURCE',
+    service,
+    name,
+    identifier,
+  });
+
+  metadataCache.set(cacheKey, {
+    value: raw,
+    expiresAt: Date.now() + METADATA_CACHE_TTL_MS,
+  });
+
+  return raw;
+};
+
 const normalizePlaylistPayload = (raw) => {
   const parsed = parseMetadataPayload(raw);
 
@@ -261,6 +309,94 @@ const normalizeAudioPayload = (raw, fallbackName = '') => {
         : null,
   };
 };
+
+export function parseQdnResourceFromUrl(url) {
+  if (typeof url !== 'string') {
+    return null;
+  }
+
+  const normalizedUrl = url.trim();
+  const match = normalizedUrl.match(/^\/arbitrary\/([^/]+)\/([^/]+)\/([^/?#]+)/i);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    service: decodeURIComponent(match[1]),
+    name: decodeURIComponent(match[2]),
+    identifier: decodeURIComponent(match[3]),
+  };
+}
+
+export async function getQdnResourceStatus({ service, name, identifier, build = false }) {
+  return requestQortal({
+    action: 'GET_QDN_RESOURCE_STATUS',
+    service,
+    name,
+    identifier,
+    ...(build ? { build: true } : {}),
+  });
+}
+
+export async function ensureQdnResourceReady(resource, options = {}) {
+  if (!resource || !isQortalRequestAvailable()) {
+    return { status: 'READY', mock: true };
+  }
+
+  const timeoutMs = options.timeoutMs ?? RESOURCE_READY_TIMEOUT_MS;
+  const pollMs = options.pollMs ?? RESOURCE_STATUS_POLL_MS;
+  const onStatus = typeof options.onStatus === 'function' ? options.onStatus : null;
+  const startTime = Date.now();
+  let buildTriggered = false;
+  let lastStatus = null;
+  let lastProgress = -1;
+
+  while (Date.now() - startTime < timeoutMs) {
+    const statusResponse = await getQdnResourceStatus(resource);
+    const status = statusResponse?.status || 'UNKNOWN';
+    const localChunkCount = Number(statusResponse?.localChunkCount || 0);
+    const totalChunkCount = Number(statusResponse?.totalChunkCount || 0);
+    const hasProgress = totalChunkCount > 0;
+    const progress = hasProgress ? Math.max(0, Math.min(100, Math.floor((localChunkCount / totalChunkCount) * 100))) : 0;
+
+    const shouldNotify = status !== lastStatus || progress !== lastProgress;
+    if (onStatus && shouldNotify) {
+      onStatus({
+        status,
+        progress,
+        localChunkCount,
+        totalChunkCount,
+      });
+    }
+
+    lastStatus = status;
+    lastProgress = progress;
+
+    if (status === 'READY') {
+      return statusResponse;
+    }
+
+    if (
+      !buildTriggered &&
+      ['PUBLISHED', 'DOWNLOADING', 'DOWNLOADED', 'BUILDING', 'MISSING_DATA'].includes(status)
+    ) {
+      buildTriggered = true;
+      try {
+        await getQdnResourceStatus({
+          ...resource,
+          build: true,
+        });
+      } catch {
+        // Keep polling; build request may fail temporarily while peer discovery is ongoing.
+      }
+    }
+
+    await sleep(pollMs);
+  }
+
+  throw new Error('QDN resource was not READY before timeout.');
+}
 
 export async function fetchSchedule() {
   if (isQortalRequestAvailable()) {
@@ -503,15 +639,9 @@ export async function fetchPublishedPlaylists(ownerName = '') {
     return [];
   }
 
-  const parsed = await Promise.all(
-    resources.map(async (item) => {
+  const parsed = await mapWithConcurrency(resources, METADATA_FETCH_CONCURRENCY, async (item) => {
       try {
-        const raw = await requestQortal({
-          action: 'FETCH_QDN_RESOURCE',
-          service: NODEFM_METADATA_SERVICE,
-          name: item.name,
-          identifier: item.identifier,
-        });
+        const raw = await fetchMetadataResource(NODEFM_METADATA_SERVICE, item.name, item.identifier);
 
         const playlistPayload = normalizePlaylistPayload(raw);
 
@@ -531,8 +661,7 @@ export async function fetchPublishedPlaylists(ownerName = '') {
       } catch {
         return null;
       }
-    }),
-  );
+    });
 
   return parsed.filter(Boolean);
 }
@@ -563,15 +692,9 @@ export async function fetchPublishedAudioTracks(ownerName = '') {
     return [];
   }
 
-  const parsed = await Promise.all(
-    resources.map(async (item) => {
+  const parsed = await mapWithConcurrency(resources, METADATA_FETCH_CONCURRENCY, async (item) => {
       try {
-        const raw = await requestQortal({
-          action: 'FETCH_QDN_RESOURCE',
-          service: NODEFM_METADATA_SERVICE,
-          name: item.name,
-          identifier: item.identifier,
-        });
+        const raw = await fetchMetadataResource(NODEFM_METADATA_SERVICE, item.name, item.identifier);
 
         const audioPayload = normalizeAudioPayload(raw, item.name);
 
@@ -600,8 +723,7 @@ export async function fetchPublishedAudioTracks(ownerName = '') {
       } catch {
         return null;
       }
-    }),
-  );
+    });
 
   return parsed.filter(Boolean);
 }
