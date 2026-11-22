@@ -7,14 +7,23 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+vi.mock('../qortium/identity', () => ({ resolveNameWalletAddress: vi.fn() }));
+
 vi.mock('../qortium/qdn', () => ({
   qdnJsonPublishFileName: (identifier: string) => `${identifier}.json`,
   fetchQdnResourceData: vi.fn(),
+  getQdnResourceStatus: vi.fn(),
   publishResource: vi.fn(),
   searchQdnResources: vi.fn(),
 }));
 
-import { fetchQdnResourceData, publishResource, searchQdnResources } from '../qortium/qdn';
+import { resolveNameWalletAddress } from '../qortium/identity';
+import {
+  getQdnResourceStatus,
+  fetchQdnResourceData,
+  publishResource,
+  searchQdnResources,
+} from '../qortium/qdn';
 import {
   createStation,
   deserializeStationFromQdn,
@@ -172,101 +181,119 @@ describe('station QDN store', () => {
   beforeEach(() => {
     resetStationStore();
     mockedFetch.mockReset();
+    vi.mocked(getQdnResourceStatus).mockReset().mockResolvedValue({ status: 'READY' });
     mockedSearch.mockReset();
     mockedPublish.mockReset();
+    vi.mocked(resolveNameWalletAddress).mockReset().mockResolvedValue('Q-owner');
   });
 
-  it('loads the station directly under the preferred publisher name', async () => {
-    mockedFetch.mockResolvedValue(stationPayload());
-
+  it('recognizes explicit Qortal NOT_PUBLISHED without attempting a download', async () => {
+    vi.mocked(getQdnResourceStatus).mockResolvedValue({ status: 'NOT_PUBLISHED' });
     await loadStationConfig('Owner');
-
     expect(getStationLoaded()).toBe(true);
-    expect(getStation()).toMatchObject({ stationId: 'station-1', ownerAddress: 'Q-owner' });
+    expect(getStation()).toBeNull();
+    expect(getStationError()).toBeNull();
+    expect(mockedFetch).not.toHaveBeenCalled();
+  });
+
+  it('loads only the named publisher and verifies its registered owner', async () => {
+    mockedFetch.mockResolvedValue(stationPayload());
+    await loadStationConfig('Owner');
+    expect(getStationLoaded()).toBe(true);
+    expect(getStation()?.ownerAddress).toBe('Q-owner');
+    expect(resolveNameWalletAddress).toHaveBeenCalledWith('Owner');
     expect(mockedSearch).not.toHaveBeenCalled();
+  });
+
+  it('never falls back to another publisher when the station is absent', async () => {
+    mockedFetch.mockRejectedValue(new Error('QDN error 1401: no file exists'));
+    await loadStationConfig('OtherStation');
+    expect(getStationLoaded()).toBe(true);
+    expect(getStation()).toBeNull();
+    expect(getStationError()).toBeNull();
+    expect(mockedSearch).not.toHaveBeenCalled();
+  });
+
+  it('uses the canonical app publisher when no explicit publisher is supplied', async () => {
+    mockedFetch.mockRejectedValue(new Error('not found'));
+    await loadStationConfig(null);
     expect(mockedFetch).toHaveBeenCalledWith({
       service: 'JSON',
-      name: 'Owner',
+      name: 'NodeFM',
       identifier: getStationQdnIdentifier(),
     });
-  });
-
-  it('falls back to global discovery for a public listener', async () => {
-    mockedFetch
-      .mockRejectedValueOnce(new Error('No account-selected resource.'))
-      .mockResolvedValueOnce(stationPayload());
-    mockedSearch.mockResolvedValue([
-      {
-        name: 'NodeFM',
-        service: 'JSON',
-        identifier: getStationQdnIdentifier(),
-      },
-    ]);
-
-    await loadStationConfig('OtherListener');
-
-    expect(getStation()).toMatchObject({ stationId: 'station-1' });
-    expect(mockedSearch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        service: 'JSON',
-        query: getStationQdnIdentifier(),
-        prefix: true,
-      }),
-    );
-  });
-
-  it('treats no discovery matches as no station program', async () => {
-    mockedFetch.mockRejectedValue(new Error('not found'));
-    mockedSearch.mockResolvedValue([]);
-
-    await loadStationConfig(null);
-
     expect(getStationLoaded()).toBe(true);
-    expect(getStation()).toBeNull();
-    expect(getStationError()).toBeNull();
   });
 
-  it('ignores non-canonical station publishers during discovery', async () => {
-    mockedSearch.mockResolvedValue([
-      { name: 'Learning DEV - iffi', service: 'JSON', identifier: getStationQdnIdentifier() },
-    ]);
-
-    await loadStationConfig(null);
-
-    expect(getStationLoaded()).toBe(true);
-    expect(getStation()).toBeNull();
-    expect(getStationError()).toBeNull();
+  it('does not turn a node outage into a fresh unconfigured station', async () => {
+    mockedFetch.mockRejectedValue(new Error('node unavailable'));
+    await loadStationConfig('Owner');
+    expect(getStationLoaded()).toBe(false);
+    expect(getStationError()).toContain('node unavailable');
+    expect(mockedSearch).not.toHaveBeenCalled();
   });
 
-  it('treats a discovered but malformed station record as a data error', async () => {
+  it('rejects a configuration pointing at another publisher', async () => {
+    mockedFetch.mockResolvedValue(stationPayload({ publisherName: 'Other' }));
+    await loadStationConfig('Owner');
+    expect(getStation()).toBeNull();
+    expect(getStationError()).toMatch(/publisher does not match/);
+  });
+
+  it('rejects an owner address that does not own the publishing name', async () => {
+    mockedFetch.mockResolvedValue(stationPayload());
+    vi.mocked(resolveNameWalletAddress).mockResolvedValue('Q-somebody-else');
+    await loadStationConfig('Owner');
+    expect(getStationLoaded()).toBe(false);
+    expect(getStationError()).toMatch(/owner does not match/);
+  });
+
+  it('does not treat a missing name after finding config as missing config', async () => {
+    mockedFetch.mockResolvedValue(stationPayload());
+    vi.mocked(resolveNameWalletAddress).mockRejectedValue(new Error('name not found'));
+    await loadStationConfig('Owner');
+    expect(getStationLoaded()).toBe(false);
+    expect(getStationError()).toContain('name not found');
+  });
+
+  it('rejects a malformed station record', async () => {
     mockedFetch.mockResolvedValue({ stationId: 'station-1', name: '' });
-    mockedSearch.mockResolvedValue([
-      { name: 'NodeFM', service: 'JSON', identifier: getStationQdnIdentifier() },
-    ]);
-
-    await loadStationConfig(null);
-
+    await loadStationConfig('Owner');
     expect(getStationLoaded()).toBe(false);
     expect(getStationError()).toMatch(/invalid nodefm station configuration/i);
   });
 
-  it('publishes and updates the singleton station resource', async () => {
+  it('ignores a late result after switching the deployment publisher', async () => {
+    let finish!: (value: unknown) => void;
+    mockedFetch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const old = loadStationConfig('Owner');
+    mockedFetch.mockResolvedValueOnce(
+      stationPayload({ publisherName: 'NewStation', stationId: 'new' }),
+    );
+    await loadStationConfig('NewStation');
+    finish(stationPayload());
+    await old;
+    expect(getStation()?.stationId).toBe('new');
+  });
+
+  it('retains the existing station serialization boundary for the publication phase', async () => {
     mockedPublish.mockResolvedValue({ accepted: true } as never);
     const station = createStation({
       name: 'NodeFM',
       publisherName: 'Owner',
       ownerAddress: 'Q-owner',
-      ownerName: 'Owner',
       timezone: 'Europe/Helsinki',
-      defaultRotationPlaylistId: 'playlist-1',
-      defaultRotationPlaylistVersionId: 'version-1',
-      stationEpochUtc: '2026-01-01T00:00:00.000Z',
+      defaultRotationPlaylistId: 'p1',
+      defaultRotationPlaylistVersionId: 'v1',
+      stationEpochUtc: '2026-01-01T00:00:00Z',
       messagingEnabled: false,
       tipsEnabled: false,
     });
-
     await saveStationConfig(station, 'Owner');
-
     expect(mockedPublish).toHaveBeenCalledWith(
       expect.objectContaining({
         service: 'JSON',

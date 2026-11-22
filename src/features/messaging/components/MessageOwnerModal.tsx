@@ -1,3 +1,4 @@
+import { Spinner } from '../../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Message Owner Modal
  *
@@ -102,7 +103,13 @@ export function MessageOwnerModal({ station, onClose }: Props) {
           onClick={handleSend}
           disabled={sending || !message.trim() || !canSend}
         >
-          {sending ? 'Sending…' : 'Send Message'}
+          {sending ? (
+            <>
+              <Spinner /> Sending
+            </>
+          ) : (
+            'Send Message'
+          )}
         </button>
       </div>
     </Modal>

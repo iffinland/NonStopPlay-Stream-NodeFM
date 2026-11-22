@@ -19,6 +19,7 @@ export type AuthContextValue = {
    */
   ownerName: string | null;
   refresh: () => void;
+  disconnect?: () => void;
 };
 
 export const AuthContext = createContext<AuthContextValue>({

@@ -18,6 +18,10 @@ export type TestBridgeHandler = (request: Record<string, unknown>) => Promise<un
 
 /** Answer the write gate's account read, then delegate to the test handler. */
 export function withUnlockedTestAccount(handler: TestBridgeHandler): TestBridgeHandler {
-  return async (request: Record<string, unknown>) =>
-    request.action === 'GET_SELECTED_ACCOUNT' ? { ...TEST_WRITE_ACCOUNT } : handler(request);
+  return async (request: Record<string, unknown>) => {
+    if (request.action === 'GET_USER_ACCOUNT') return { ...TEST_WRITE_ACCOUNT };
+    if (request.action === 'GET_NAME_DATA')
+      return { name: request.name, owner: TEST_WRITE_ACCOUNT.address };
+    return handler(request);
+  };
 }

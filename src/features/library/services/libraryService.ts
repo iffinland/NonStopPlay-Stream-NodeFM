@@ -32,6 +32,7 @@ import {
   isConfirmedQdnNotFoundError,
 } from '../../../qortium/qdnReadError';
 import { mapWithConcurrency } from '../../../utils/mapConcurrent';
+import { SUBMISSION_IDENTIFIER_PREFIX } from '../../listener-submissions/services/submissionService';
 
 // ── In-Memory Store ─────────────────────────────────────────────────
 
@@ -217,6 +218,9 @@ export async function loadLibrary(ownerName: string, ownerAddress: string): Prom
     const identifiers = [];
     for (const result of results) {
       if (!result.identifier || !result.identifier.startsWith(TRACK_IDENTIFIER_PREFIX)) continue;
+      // Submission proposals share the broad track prefix but are not Track
+      // records, even when the station publisher submitted them itself.
+      if (result.identifier.startsWith(SUBMISSION_IDENTIFIER_PREFIX)) continue;
       if (seenTrackIdentifiers.has(result.identifier)) continue;
       seenTrackIdentifiers.add(result.identifier);
       identifiers.push(result.identifier);

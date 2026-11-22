@@ -34,12 +34,6 @@ export {
   getAccountWriteReadiness,
   resetAccountWriteGateCache,
   QortiumAccountRequiredError,
-  QortiumAccountUnlockUnsupportedError,
-  QortiumAccountUnlockCancelledError,
-  ACTION_GET_SELECTED_ACCOUNT,
-  ACTION_SHOW_ACTIONS,
-  ACTION_UNLOCK_SELECTED_ACCOUNT,
-  ACCOUNT_SELECTION_ACTIONS,
 } from './accountWriteGate';
 export type { AccountWriteTicket, AccountWriteReadiness } from './accountWriteGate';
 
@@ -48,7 +42,6 @@ export {
   publishResource,
   publishMultipleResources,
   selectPublishSource,
-  stageQdnPublishSource,
   getQdnPublishCapability,
   isQdnPublishSourceSupported,
   resetQdnPublishCapabilityCache,
@@ -77,8 +70,6 @@ export type {
   QdnPublishCapability,
   QdnPublishSourceInput,
   QdnPublishSourceKind,
-  StageQdnPublishSourceInput,
-  StageQdnPublishSourceResult,
   SelectPublishSourceResult,
   QdnSearchParams,
   QdnResourceInfo,

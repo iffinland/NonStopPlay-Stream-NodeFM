@@ -1,3 +1,4 @@
+import { Spinner } from '../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Playlist Editor Page (Admin)
  *
@@ -549,7 +550,13 @@ export default function PlaylistEditorPage() {
                   onClick={handleSaveMeta}
                   disabled={saving}
                 >
-                  {saving ? 'Saving…' : 'Save'}
+                  {saving ? (
+                    <>
+                      <Spinner /> Saving
+                    </>
+                  ) : (
+                    'Save'
+                  )}
                 </button>
               </div>
             </div>
@@ -621,9 +628,13 @@ export default function PlaylistEditorPage() {
             onClick={handlePublish}
             disabled={publishing || !publishableCheck.publishable}
           >
-            {publishing
-              ? 'Publishing…'
-              : `Publish Version ${(latestVersion?.versionNumber ?? 0) + 1}`}
+            {publishing ? (
+              <>
+                <Spinner /> Publishing
+              </>
+            ) : (
+              `Publish Version ${(latestVersion?.versionNumber ?? 0) + 1}`
+            )}
           </button>
         </div>
 
@@ -813,7 +824,6 @@ export default function PlaylistEditorPage() {
           title={transactionTitle}
           state={transaction}
           onClose={() => setTransaction(null)}
-          onRetry={() => setTransaction(null)}
         />
       ) : null}
     </PageShell>

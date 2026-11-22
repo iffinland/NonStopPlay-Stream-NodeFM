@@ -1,7 +1,7 @@
 /* ============================================================
  * NodeFM Station — Bridge Transport Contract Tests
  *
- * Confirms the production bridge resolves `window.qdnRequest`
+ * Confirms the production bridge resolves `window.qortalRequest`
  * rather than a custom postMessage protocol.
  * ============================================================ */
 
@@ -13,36 +13,91 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('Qortium bridge transport', () => {
-  it('resolves window.qdnRequest as the application bridge', () => {
-    const qdnRequest = vi.fn();
-    vi.stubGlobal('window', { qdnRequest });
+describe('Qortal bridge transport', () => {
+  it('rejects unported Home, social and background actions before sending any request', async () => {
+    const request = vi.fn();
+    vi.stubGlobal('window', { qortalRequest: request });
+    for (const action of [
+      'STAGE_QDN_PUBLISH_SOURCE',
+      'SEND_COIN',
+      'GET_SELECTED_ACCOUNT',
+      'SET_QDN_BACKGROUND_AUDIO_QUEUE',
+    ]) {
+      await expect(sendBridgeRequest({ action })).rejects.toThrow(/not available/);
+    }
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('does not borrow a parent frame or Qortium bridge', () => {
+    vi.stubGlobal('window', {
+      qdnRequest: vi.fn(),
+      parent: { qortalRequest: vi.fn() },
+      top: { qortalRequest: vi.fn() },
+    });
+    expect(isBridgeAvailable()).toBe(false);
+  });
+
+  it('does not repeat denied authentication or confirmed missing public resources', async () => {
+    const request = vi
+      .fn()
+      .mockRejectedValue({ error: 'USER_DECLINED', message: 'Access declined' });
+    vi.stubGlobal('window', { qortalRequest: request });
+    await expect(sendBridgeRequest({ action: 'GET_USER_ACCOUNT' })).rejects.toThrow(
+      /USER_DECLINED/,
+    );
+    expect(request).toHaveBeenCalledTimes(1);
+    request
+      .mockClear()
+      .mockRejectedValue({ error: 1401, message: "Couldn't find PUT transaction" });
+    await expect(
+      sendBridgeRequest({ action: 'FETCH_QDN_RESOURCE', service: 'JSON', name: 'Station' }),
+    ).rejects.toThrow(/1401/);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes a resource path with the Core filepath field', async () => {
+    const request = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('window', { qortalRequest: request });
+    const { fetchQdnResource } = await import('../qortium/bridge');
+    await fetchQdnResource('DOCUMENT', 'Station', 'catalog', 'nested/data.json');
+    expect(request).toHaveBeenCalledWith({
+      action: 'FETCH_QDN_RESOURCE',
+      service: 'DOCUMENT',
+      name: 'Station',
+      identifier: 'catalog',
+      filepath: 'nested/data.json',
+    });
+  });
+
+  it('resolves window.qortalRequest as the application bridge', () => {
+    const qortalRequest = vi.fn();
+    vi.stubGlobal('window', { qortalRequest });
 
     const resolution = resolveBridge();
 
     expect(resolution.status).toBe('AVAILABLE');
     if (resolution.status === 'AVAILABLE') {
       expect(resolution.source).toBe('window');
-      expect(resolution.bridge.request).toBe(qdnRequest);
+      expect(resolution.bridge.request).toBe(qortalRequest);
     }
 
     expect(isBridgeAvailable()).toBe(true);
   });
 
-  it('reports the bridge unavailable when no qdnRequest is present', () => {
+  it('reports the bridge unavailable when no qortalRequest is present', () => {
     vi.stubGlobal('window', { parent: {}, top: {} });
     expect(resolveBridge().status).toBe('UNAVAILABLE');
     expect(isBridgeAvailable()).toBe(false);
   });
 
-  it('passes the request object through window.qdnRequest and returns its result', async () => {
-    const qdnRequest = vi.fn().mockResolvedValue({ address: 'Q-owner' });
-    vi.stubGlobal('window', { qdnRequest });
+  it('passes the request object through window.qortalRequest and returns its result', async () => {
+    const qortalRequest = vi.fn().mockResolvedValue({ address: 'Q-owner' });
+    vi.stubGlobal('window', { qortalRequest });
 
-    await expect(sendBridgeRequest({ action: 'GET_SELECTED_ACCOUNT' })).resolves.toEqual({
+    await expect(sendBridgeRequest({ action: 'GET_USER_ACCOUNT' })).resolves.toEqual({
       address: 'Q-owner',
     });
-    expect(qdnRequest).toHaveBeenCalledWith({ action: 'GET_SELECTED_ACCOUNT' });
+    expect(qortalRequest).toHaveBeenCalledWith({ action: 'GET_USER_ACCOUNT' });
   });
 
   it('passes a successful FETCH_QDN_RESOURCE payload with a top-level message through', async () => {
@@ -53,8 +108,8 @@ describe('Qortium bridge transport', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
-    const qdnRequest = vi.fn().mockResolvedValue(notice);
-    vi.stubGlobal('window', { qdnRequest });
+    const qortalRequest = vi.fn().mockResolvedValue(notice);
+    vi.stubGlobal('window', { qortalRequest });
 
     const result = await sendBridgeRequest({
       action: 'FETCH_QDN_RESOURCE',
@@ -68,11 +123,11 @@ describe('Qortium bridge transport', () => {
   });
 
   it('still rejects an explicit FETCH_QDN_RESOURCE failure with success: false', async () => {
-    const qdnRequest = vi.fn().mockResolvedValue({
+    const qortalRequest = vi.fn().mockResolvedValue({
       success: false,
       message: 'node read failed',
     });
-    vi.stubGlobal('window', { qdnRequest });
+    vi.stubGlobal('window', { qortalRequest });
 
     await expect(
       sendBridgeRequest({
@@ -81,15 +136,15 @@ describe('Qortium bridge transport', () => {
         name: 'NodeFM',
         identifier: 'nodefm-notice-notice-1',
       }),
-    ).rejects.toThrow(/Qortium request failed/);
+    ).rejects.toThrow(/Qortal request failed/);
   });
 
   it('normalizes numeric QDN error objects to a readable node error', async () => {
-    const qdnRequest = vi.fn().mockResolvedValue({
+    const qortalRequest = vi.fn().mockResolvedValue({
       error: 1401,
       message: "Couldn't find PUT transaction for name Owner, service JSON and identifier track-t1",
     });
-    vi.stubGlobal('window', { qdnRequest });
+    vi.stubGlobal('window', { qortalRequest });
 
     await expect(
       sendBridgeRequest({
@@ -102,15 +157,15 @@ describe('Qortium bridge transport', () => {
   });
 
   it('normalizes rejected numeric QDN error objects instead of losing the code', async () => {
-    const qdnRequest = vi.fn().mockRejectedValue({
+    const qortalRequest = vi.fn().mockRejectedValue({
       error: 125,
       message: 'identifier must not exceed 64 UTF-8 bytes',
     });
-    vi.stubGlobal('window', { qdnRequest });
+    vi.stubGlobal('window', { qortalRequest });
 
     await expect(
       sendBridgeRequest({
-        action: 'PUBLISH_QDN_RESOURCE',
+        action: 'GET_USER_ACCOUNT',
         service: 'JSON',
         name: 'Owner',
         identifier: 'nodefm-like-too-long',
@@ -119,32 +174,26 @@ describe('Qortium bridge transport', () => {
   });
 
   it('still treats a top-level message as an error for non-resource actions', async () => {
-    const qdnRequest = vi.fn().mockResolvedValue({
+    const qortalRequest = vi.fn().mockResolvedValue({
       message: 'account unavailable',
     });
-    vi.stubGlobal('window', { qdnRequest });
+    vi.stubGlobal('window', { qortalRequest });
 
-    await expect(sendBridgeRequest({ action: 'GET_SELECTED_ACCOUNT' })).rejects.toThrow(
+    await expect(sendBridgeRequest({ action: 'GET_USER_ACCOUNT' })).rejects.toThrow(
       /account unavailable/,
     );
   });
 
-  /**
-   * Home 2.1 builds and broadcasts a publish sub-second after approval, but its
-   * response can take ~120 s to reach the app. A write must therefore keep a
-   * longer budget than a read, or a successful publish is reported as a timeout
-   * and the user is invited to publish it twice.
-   */
-  it('gives a signed write a longer budget than a read', async () => {
+  it('allows time for explicit account approval while keeping public reads bounded', async () => {
     vi.useFakeTimers();
     try {
-      const qdnRequest = vi.fn(() => new Promise(() => {}));
-      vi.stubGlobal('window', { qdnRequest });
+      const qortalRequest = vi.fn(() => new Promise(() => {}));
+      vi.stubGlobal('window', { qortalRequest });
 
-      const write = sendBridgeRequest({ action: 'PUBLISH_QDN_RESOURCE', service: 'JSON' });
+      const write = sendBridgeRequest({ action: 'GET_USER_ACCOUNT', service: 'JSON' });
       const writeOutcome = write.catch((error: unknown) => String(error));
       await vi.advanceTimersByTimeAsync(120_000);
-      expect(qdnRequest).not.toHaveBeenCalledTimes(0);
+      expect(qortalRequest).not.toHaveBeenCalledTimes(0);
       await vi.advanceTimersByTimeAsync(180_000);
       await expect(writeOutcome).resolves.toMatch(/timed out after 300 seconds/);
 

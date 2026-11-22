@@ -27,14 +27,7 @@ vi.mock('../features/library/services/libraryService', () => ({
   upsertTrackLocally: vi.fn(),
 }));
 
-vi.mock('../utils/duration', async () => {
-  const actual = await vi.importActual<typeof import('../utils/duration')>('../utils/duration');
-
-  return {
-    ...actual,
-    resolveAudioDurationFromUrl: vi.fn(),
-  };
-});
+vi.mock('../utils/localAudioDuration', () => ({ resolvePublishAudioDuration: vi.fn() }));
 
 import {
   ensureQdnResourceReady,
@@ -50,7 +43,7 @@ import {
   trackPublishResource,
   upsertTrackLocally,
 } from '../features/library/services/libraryService';
-import { resolveAudioDurationFromUrl } from '../utils/duration';
+import { resolvePublishAudioDuration } from '../utils/localAudioDuration';
 import {
   acceptSubmission,
   getSubmissionDiagnostics,
@@ -77,7 +70,7 @@ const mockedSearch = vi.mocked(searchQdnResources);
 const mockedFetch = vi.mocked(fetchQdnResourceData);
 const mockedEnsureReady = vi.mocked(ensureQdnResourceReady);
 const mockedGetUrl = vi.mocked(getQdnResourceUrl);
-const mockedResolveDuration = vi.mocked(resolveAudioDurationFromUrl);
+const mockedResolveDuration = vi.mocked(resolvePublishAudioDuration);
 const mockedResolveName = vi.mocked(resolveNameWalletAddress);
 const mockedTrackPublishResource = vi.mocked(trackPublishResource);
 const mockedUpsertTrack = vi.mocked(upsertTrackLocally);
@@ -173,7 +166,8 @@ describe('publishListenerSubmission', () => {
         fileName: 'song.mp3',
         kind: 'file',
         size: 1000,
-        sourceToken: 'token-1',
+        file: new File(['audio'], 'song.mp3', { type: 'audio/mpeg' }),
+        mimeType: 'audio/mpeg',
       } as SelectPublishSourceResult & { canceled: false },
     });
 
@@ -184,7 +178,8 @@ describe('publishListenerSubmission', () => {
           service: 'AUDIO',
           name: LISTENER_A,
           identifier: getSubmissionAudioQdnIdentifier(SUBMISSION_ID),
-          sourceToken: 'token-1',
+          file: expect.any(Blob),
+          fileName: 'song.mp3',
         }),
       ]),
     );
@@ -209,7 +204,8 @@ describe('publishListenerSubmission', () => {
         fileName: 'song.mp3',
         kind: 'file',
         size: 1000,
-        sourceToken: 'token-1',
+        file: new File(['audio'], 'song.mp3', { type: 'audio/mpeg' }),
+        mimeType: 'audio/mpeg',
       } as SelectPublishSourceResult & { canceled: false },
     });
 
@@ -229,7 +225,7 @@ describe('publishListenerSubmission', () => {
     }
   });
 
-  it('returns partial state and never publishes metadata when duration is invalid', async () => {
+  it('rejects invalid duration before publishing any resource', async () => {
     mockedResolveDuration.mockResolvedValue(0);
 
     const result = await publishListenerSubmission({
@@ -242,12 +238,13 @@ describe('publishListenerSubmission', () => {
         fileName: 'song.mp3',
         kind: 'file',
         size: 1000,
-        sourceToken: 'token-1',
+        file: new File(['audio'], 'song.mp3', { type: 'audio/mpeg' }),
+        mimeType: 'audio/mpeg',
       } as SelectPublishSourceResult & { canceled: false },
     });
 
-    expect(result.status).toBe('partial');
-    expect(mockedBatchPublish).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe('failed');
+    expect(mockedBatchPublish).not.toHaveBeenCalled();
     expect(mockedPublish).not.toHaveBeenCalled();
   });
 
@@ -266,7 +263,8 @@ describe('publishListenerSubmission', () => {
         fileName: 'song.mp3',
         kind: 'file',
         size: 1000,
-        sourceToken: 'token-1',
+        file: new File(['audio'], 'song.mp3', { type: 'audio/mpeg' }),
+        mimeType: 'audio/mpeg',
       } as SelectPublishSourceResult & { canceled: false },
     });
 

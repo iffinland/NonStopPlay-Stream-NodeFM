@@ -1,11 +1,12 @@
 /* ============================================================
- * NodeFM Station — Qortium Auth
+ * NodeFM Station — Qortal Auth
  *
  * Authentication and identity resolution.
  * All auth state flows through this module.
  * ============================================================ */
 
 import { getSelectedAccount } from './bridge';
+import { clearIdentityCaches, getAccountNames } from './identity';
 
 export type AuthState =
   | { status: 'loading' }
@@ -14,6 +15,7 @@ export type AuthState =
       status: 'authenticated';
       address: string;
       name?: string;
+      names?: string[];
     }
   | { status: 'error'; message: string };
 
@@ -22,7 +24,7 @@ let authResolvePromise: Promise<AuthState> | null = null;
 let authResolveEpoch = 0;
 
 /**
- * Resolve the current authenticated user from Qortium Home.
+ * Resolve the current Hub account; Hub owns remembered auto-auth permissions.
  * Result is memoized — call `refreshAuth()` to force a re-fetch.
  */
 export async function resolveAuth(): Promise<AuthState> {
@@ -75,10 +77,14 @@ async function resolveAuthInternal(): Promise<AuthState> {
       return { status: 'unauthenticated' };
     }
 
+    // The address authenticates the account. Optional display-name discovery
+    // must not turn a valid Hub account into an anonymous guest on node errors.
+    const names = await getAccountNames(account.address).catch(() => []);
     return {
       status: 'authenticated',
       address: account.address,
-      name: account.name,
+      name: account.name ?? names[0],
+      names,
     };
   } catch (error) {
     // Map "no selected account" to unauthenticated instead of error.
@@ -96,6 +102,7 @@ async function resolveAuthInternal(): Promise<AuthState> {
 
 /** Force re-fetch of auth state. */
 export function refreshAuth(): void {
+  clearIdentityCaches();
   authResolveEpoch += 1;
   cachedAuthState = { status: 'loading' };
   authResolvePromise = null;
@@ -111,24 +118,20 @@ export function isStationOwner(userAddress: string | null, ownerAddress: string 
   return userAddress === ownerAddress;
 }
 
-// ── Account Change Listener ─────────────────────────────────────────
-//
-// Home sends `qortium:selected-account-changed` via postMessage when
-// the selected account changes or the wallet lock state changes.
-// The event is a signal only — no account data is included.
-// Apps must re-call GET_SELECTED_ACCOUNT after receiving it.
-
+/** Revalidate an established Hub session when its app becomes active again. */
 export function listenForAccountChanges(onChange: () => void): () => void {
-  const handler = (event: MessageEvent) => {
-    const data = event.data as { type?: string };
-
-    if (data?.type === 'qortium:selected-account-changed') {
-      refreshAuth();
-      onChange();
-    }
+  const onVisible = () => {
+    if (document.visibilityState === 'visible') onChange();
   };
+  document.addEventListener('visibilitychange', onVisible);
+  window.addEventListener('focus', onVisible);
+  return () => {
+    document.removeEventListener('visibilitychange', onVisible);
+    window.removeEventListener('focus', onVisible);
+  };
+}
 
-  window.addEventListener('message', handler);
-
-  return () => window.removeEventListener('message', handler);
+/** An in-memory identity expectation, never used as signing authority. */
+export function getResolvedAccountAddress(): string | undefined {
+  return cachedAuthState.status === 'authenticated' ? cachedAuthState.address : undefined;
 }

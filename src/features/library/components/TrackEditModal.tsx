@@ -1,3 +1,4 @@
+import { Spinner } from '../../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Track Edit Modal
  *
@@ -191,7 +192,6 @@ export function TrackEditModal({ track, onClose }: Props) {
             setTransaction(null);
             if (transaction.phase === 'success') onClose();
           }}
-          onRetry={() => void handleSave()}
         />
       ) : (
         <>
@@ -296,7 +296,17 @@ export function TrackEditModal({ track, onClose }: Props) {
               onClick={handleSave}
               disabled={saving || coverPublishing || !title.trim()}
             >
-              {coverPublishing ? 'Publishing cover…' : saving ? 'Saving…' : 'Save'}
+              {coverPublishing ? (
+                <>
+                  <Spinner /> Publishing cover
+                </>
+              ) : saving ? (
+                <>
+                  <Spinner /> Saving
+                </>
+              ) : (
+                'Save'
+              )}
             </button>
           </div>
         </>

@@ -42,6 +42,7 @@ type PublicationProgressProps = {
   title: string;
   state: PublicationProgressState;
   successMessage?: string;
+  progressMessage?: string;
   onClose: () => void;
   onSuccess?: () => void;
   standalone?: boolean;
@@ -67,6 +68,7 @@ export function PublicationProgress({
   title,
   state,
   successMessage = 'Completed.',
+  progressMessage,
   onClose,
   onSuccess,
   standalone = true,
@@ -89,6 +91,8 @@ export function PublicationProgress({
           </li>
         ))}
       </ol>
+
+      {state.phase === 'publishing' && progressMessage ? <p>{progressMessage}</p> : null}
 
       {state.error ? <p className="form-error">{state.error}</p> : null}
       {state.phase === 'success' ? <p className="form-success">{successMessage}</p> : null}

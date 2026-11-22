@@ -18,36 +18,34 @@ describe('canonical app share target', () => {
         _qdnName: 'NodeFM',
         _qdnIdentifier: 'Radio-AutoDJ',
       }),
-    ).toBe('qdn://APP/NodeFM/Radio-AutoDJ');
+    ).toBe('qortal://APP/NodeFM/Radio-AutoDJ');
   });
 
   it('falls back to the canonical NodeFM APP identity when host globals are absent', () => {
-    expect(buildAppShareTarget({})).toBe('qdn://APP/NodeFM/Radio-AutoDJ');
+    expect(buildAppShareTarget({})).toBe('qortal://APP/NodeFM');
   });
 });
 
 describe('canonical playlist share target', () => {
   it('produces a NodeFM APP playlist route, not a raw PLAYLIST viewer URL', () => {
-    expect(buildPlaylistShareTarget('playlist-1')).toBe(
-      'qdn://APP/NodeFM/Radio-AutoDJ/playlists/playlist-1',
-    );
+    expect(buildPlaylistShareTarget('playlist-1')).toBe('qortal://APP/NodeFM/playlists/playlist-1');
   });
 
   it('encodes spaces and special characters in the playlist route segment', () => {
     expect(buildPlaylistShareTarget('playlist / 1')).toBe(
-      'qdn://APP/NodeFM/Radio-AutoDJ/playlists/playlist%20%2F%201',
+      'qortal://APP/NodeFM/playlists/playlist%20%2F%201',
     );
   });
 
   it('builds typed share targets', () => {
-    expect(buildShareTarget({ kind: 'app' }, {})).toBe('qdn://APP/NodeFM/Radio-AutoDJ');
+    expect(buildShareTarget({ kind: 'app' }, {})).toBe('qortal://APP/NodeFM');
 
     expect(
       buildShareTarget(
         { kind: 'playlist', playlistId: 'p1' },
         { _qdnService: 'APP', _qdnName: 'NodeFM', _qdnIdentifier: 'Radio-AutoDJ' },
       ),
-    ).toBe('qdn://APP/NodeFM/Radio-AutoDJ/playlists/p1');
+    ).toBe('qortal://APP/NodeFM/Radio-AutoDJ/playlists/p1');
   });
 
   it('never emits the obsolete Learning DEV - iffi identity', () => {
@@ -62,7 +60,7 @@ describe('canonical playlist share target', () => {
 describe('clipboard copy', () => {
   it('returns true when the modern clipboard API succeeds', async () => {
     const writeText = async () => {};
-    const result = await copyShareTarget('qdn://APP/NodeFM/NodeFM', {
+    const result = await copyShareTarget('qortal://APP/NodeFM/NodeFM', {
       navigator: { clipboard: { writeText } },
     });
 
@@ -85,7 +83,7 @@ describe('clipboard copy', () => {
         style: {},
       }) as unknown as ReturnType<Document['createElement']>;
 
-    const result = await copyShareTarget('qdn://APP/NodeFM/NodeFM', {
+    const result = await copyShareTarget('qortal://APP/NodeFM/NodeFM', {
       navigator: {
         clipboard: {
           writeText: async () => {
@@ -105,7 +103,7 @@ describe('clipboard copy', () => {
 
   it('returns false when copy is unavailable', async () => {
     await expect(
-      copyShareTarget('qdn://APP/NodeFM/NodeFM', {
+      copyShareTarget('qortal://APP/NodeFM/NodeFM', {
         navigator: {},
         document: {
           body: null as unknown as HTMLElement,

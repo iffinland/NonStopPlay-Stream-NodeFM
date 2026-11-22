@@ -7,8 +7,9 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAuth } from '../../app/providers/authContext';
-import { isStationOwner } from '../../qortium/auth';
-import { NODEFM_APP_NAME, getCanonicalNodeFmAppIdentity } from '../../qortium/navigation';
+import { clearIdentityCaches } from '../../qortium/identity';
+import { usePublisherOwner } from './usePublisherOwner';
+import { getCanonicalNodeFmAppIdentity } from '../../qortium/navigation';
 import { recordStartupEvent } from '../../services/perf/startupDiagnostics';
 import type { Station } from '../../types/domain';
 import { StationContext, type StationContextValue } from './stationContext';
@@ -35,6 +36,14 @@ import {
 export function StationProvider({ children }: { children: ReactNode }) {
   const { auth } = useAuth();
   const userAddress = auth.status === 'authenticated' ? auth.address : null;
+  const [ownerRevision, setOwnerRevision] = useState(0);
+  const publisherOwner = usePublisherOwner(
+    getCanonicalNodeFmAppIdentity().name,
+    userAddress,
+    ownerRevision,
+    auth,
+  );
+  const isOwner = publisherOwner.isOwner;
 
   const [station, setStation] = useState<Station | null>(getStation());
   const [loaded, setLoaded] = useState(getStationLoaded());
@@ -60,7 +69,7 @@ export function StationProvider({ children }: { children: ReactNode }) {
     // The canonical NodeFM station config is published under the APP name,
     // never under the selected account's primary name. This keeps the clean
     // reset from accidentally resolving an old test identity.
-    const action = getStationLoadAction(NODEFM_APP_NAME);
+    const action = getStationLoadAction(getCanonicalNodeFmAppIdentity().name);
 
     if (action === 'reuse') {
       setStation(getStation());
@@ -77,7 +86,7 @@ export function StationProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setError(null);
     setPublisherName(null);
-    loadStationConfig(NODEFM_APP_NAME);
+    loadStationConfig(getCanonicalNodeFmAppIdentity().name);
   }, []);
 
   useEffect(() => {
@@ -96,13 +105,15 @@ export function StationProvider({ children }: { children: ReactNode }) {
   }, [error, loaded, loading]);
 
   const refresh = useCallback(async () => {
+    clearIdentityCaches();
+    setOwnerRevision((revision) => revision + 1);
     resetStationStore();
     setStation(null);
     setLoaded(false);
     setLoading(true);
     setError(null);
     setPublisherName(null);
-    await loadStationConfig(NODEFM_APP_NAME);
+    await loadStationConfig(getCanonicalNodeFmAppIdentity().name);
   }, []);
 
   const saveStation = useCallback(
@@ -112,7 +123,10 @@ export function StationProvider({ children }: { children: ReactNode }) {
       }
 
       const appIdentity = getCanonicalNodeFmAppIdentity();
-      const publisherName = station?.publisherName?.trim() || appIdentity.name;
+      const publisherName = appIdentity.name;
+      if (!isOwner || !loaded || error) {
+        throw new Error('Only the verified Qortal app publisher can edit this station.');
+      }
 
       const nextStation = station
         ? editStation(station, input as EditStationInput)
@@ -124,10 +138,8 @@ export function StationProvider({ children }: { children: ReactNode }) {
 
       return saveStationConfig(nextStation, nextStation.publisherName);
     },
-    [userAddress, station],
+    [userAddress, station, loaded, error, isOwner],
   );
-
-  const isOwner = isStationOwner(userAddress, station ? station.ownerAddress : userAddress);
 
   const value: StationContextValue = {
     station,
@@ -136,6 +148,8 @@ export function StationProvider({ children }: { children: ReactNode }) {
     error,
     publisherName,
     isOwner,
+    ownerLookupLoading: publisherOwner.loading,
+    ownerLookupError: publisherOwner.error,
     saveStation,
     refresh,
   };

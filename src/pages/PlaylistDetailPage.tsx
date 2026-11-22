@@ -1,3 +1,4 @@
+import { Spinner } from '../components/Spinner';
 /* ============================================================
  * NodeFM Station — Public Playlist Detail Page
  *
@@ -278,7 +279,13 @@ export default function PlaylistDetailPage() {
               onClick={() => startPlayback(0)}
               disabled={resolvingAudio}
             >
-              {resolvingAudio ? 'Preparing audio…' : 'Listen to Playlist'}
+              {resolvingAudio ? (
+                <>
+                  <Spinner /> Preparing audio
+                </>
+              ) : (
+                'Listen to Playlist'
+              )}
             </button>
             {startError && <p className="playlist-detail__error">{startError}</p>}
           </section>

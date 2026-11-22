@@ -327,7 +327,8 @@ export function validateSubmissionStructuralIntegrity(
     submission.audio.service.toUpperCase() !== 'AUDIO' ||
     normalizeSubmissionName(submission.audio.name) !==
       normalizeSubmissionName(submission.submitterName) ||
-    submission.audio.identifier !== getSubmissionAudioQdnIdentifier(submission.submissionId)
+    (submission.audio.identifier !== getSubmissionAudioQdnIdentifier(submission.submissionId) &&
+      submission.audio.identifier !== `nodefm-audio-${submission.submissionId}`)
   ) {
     return {
       ok: false,
@@ -341,7 +342,8 @@ export function validateSubmissionStructuralIntegrity(
       submission.cover.service.toUpperCase() !== 'IMAGE' ||
       normalizeSubmissionName(submission.cover.name) !==
         normalizeSubmissionName(submission.submitterName) ||
-      submission.cover.identifier !== getSubmissionCoverQdnIdentifier(submission.submissionId)
+      (submission.cover.identifier !== getSubmissionCoverQdnIdentifier(submission.submissionId) &&
+        submission.cover.identifier !== `nodefm-cover-${submission.submissionId}`)
     ) {
       return {
         ok: false,

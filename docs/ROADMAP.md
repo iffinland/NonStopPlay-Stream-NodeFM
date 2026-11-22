@@ -1,5 +1,18 @@
 # Development Roadmap
 
+## Qortal port checkpoint — 2026-11-22
+
+Owner runtime accepted `0.1.0-qortal-rc.5`, including the progress and in-app
+submission-preview refinements. Qortal port phases 1–2 are complete for foreground
+Hub operation. Main checkpoint publication is owner-authorized. Phase 3 (durable
+removal, messages/tips and remaining integration) has not started. Android
+background playback is excluded; final release validation remains a later gate.
+See [current scope](QORTAL-PHASE2.md) and
+[acceptance evidence](../reports/QORTAL-RC5-ACCEPTANCE.md).
+
+The phase numbers below describe the original imported Qortium product roadmap,
+not the Qortal port phases in the compatibility audit.
+
 This roadmap records the original specification phases and the durable
 hardening workstream. It is not a live task ledger. For current repository
 state, inspect Git/source and the canonical project context and reports.

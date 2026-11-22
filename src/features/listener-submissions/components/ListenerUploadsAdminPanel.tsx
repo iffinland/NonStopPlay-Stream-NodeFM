@@ -1,13 +1,14 @@
+import { Spinner } from '../../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Listener Uploads Admin Panel
  *
  * Station-owner review surface for pending/accepted/rejected listener
  * submissions. Moderation authority is enforced by the store, not only
- * by hiding buttons. Audio preview opens through Qortium Home navigation
- * and does not touch the global live/playlist AudioEngine.
+ * by hiding buttons. Audio preview stays in a modal and pauses the global player when the
+ * preview actually starts playing.
  * ============================================================ */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { LoadingState } from '../../../components/LoadingState';
 import { ErrorState } from '../../../components/ErrorState';
 import { Modal } from '../../../components/Modal';
@@ -18,7 +19,8 @@ import {
   type QdnTransactionState,
 } from '../../../components/qdnTransactionFlow';
 import { formatDurationMs } from '../../../utils/duration';
-import { buildQdnUrl, openQdnAddress } from '../../../qortium/navigation';
+import { SubmissionAudioPreview } from './SubmissionAudioPreview';
+import type { ListenerTrackSubmission } from '../../../types/domain';
 import { TrackCover } from '../../library/components/TrackCover';
 import { useLibrary } from '../../../hooks/useLibrary';
 import { PaginationControls, paginateItems, usePagination } from '../../pagination';
@@ -37,6 +39,8 @@ export function ListenerUploadsAdminPanel() {
   const [action, setAction] = useState<ActionState | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const actionBusyRef = useRef(false);
+  const [preview, setPreview] = useState<ListenerTrackSubmission | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [transaction, setTransaction] = useState<QdnTransactionState | null>(null);
   const pagination = usePagination(reviews.length);
@@ -57,7 +61,8 @@ export function ListenerUploadsAdminPanel() {
   };
 
   const runAction = async () => {
-    if (!action) return;
+    if (!action || actionBusyRef.current) return;
+    actionBusyRef.current = true;
 
     setActionBusy(true);
     setActionError(null);
@@ -118,6 +123,7 @@ export function ListenerUploadsAdminPanel() {
           : current,
       );
     } finally {
+      actionBusyRef.current = false;
       setActionBusy(false);
     }
   };
@@ -174,6 +180,7 @@ export function ListenerUploadsAdminPanel() {
               review={review}
               onAccept={() => openAction(review, 'accept')}
               onReject={() => openAction(review, 'reject')}
+              onPreview={() => setPreview(review.submission)}
             />
           ))}
         </div>
@@ -189,6 +196,7 @@ export function ListenerUploadsAdminPanel() {
         />
       ) : null}
 
+      {preview && <SubmissionAudioPreview submission={preview} onClose={() => setPreview(null)} />}
       {action ? (
         <Modal
           title={action.type === 'accept' ? 'Accept submission' : 'Reject submission'}
@@ -204,7 +212,6 @@ export function ListenerUploadsAdminPanel() {
                   setTransaction(null);
                   setAction(null);
                 }}
-                onRetry={() => void runAction()}
               />
             ) : (
               <>
@@ -245,7 +252,15 @@ export function ListenerUploadsAdminPanel() {
                     onClick={() => void runAction()}
                     disabled={actionBusy}
                   >
-                    {actionBusy ? 'Saving…' : action.type === 'accept' ? 'Accept' : 'Reject'}
+                    {actionBusy ? (
+                      <>
+                        <Spinner /> Saving
+                      </>
+                    ) : action.type === 'accept' ? (
+                      'Accept'
+                    ) : (
+                      'Reject'
+                    )}
                   </button>
                 </div>
               </>
@@ -261,10 +276,12 @@ function SubmissionReviewCard({
   review,
   onAccept,
   onReject,
+  onPreview,
 }: {
   review: ListenerSubmissionReview;
   onAccept: () => void;
   onReject: () => void;
+  onPreview: () => void;
 }) {
   const submission = review.submission;
 
@@ -299,14 +316,8 @@ function SubmissionReviewCard({
       </div>
 
       <div className="submission-card__actions">
-        <button
-          className="button button--secondary"
-          type="button"
-          onClick={() => {
-            void openQdnAddress(buildQdnUrl(submission.audio), 'new');
-          }}
-        >
-          Open Audio
+        <button className="button button--secondary" type="button" onClick={onPreview}>
+          Preview Audio
         </button>
         {review.status === 'PENDING' ? (
           <button className="button button--primary" type="button" onClick={onAccept}>

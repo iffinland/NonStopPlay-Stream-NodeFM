@@ -15,6 +15,8 @@ export type StationContextValue = {
   error: string | null;
   publisherName: string | null;
   isOwner: boolean;
+  ownerLookupLoading?: boolean;
+  ownerLookupError?: string | null;
   saveStation: (input: StationSaveInput) => Promise<Station>;
   refresh: () => Promise<void>;
 };

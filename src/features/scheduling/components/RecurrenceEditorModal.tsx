@@ -1,3 +1,4 @@
+import { Spinner } from '../../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Recurrence Editor Modal
  *
@@ -62,8 +63,7 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
   const { station } = useStation();
   const { publisherName } = useStationIdentity();
   const { playlists, getVersions } = usePlaylists();
-  const { createRecurrence, updateRecurrence, retryRecurrenceEvents, getRecurrence } =
-    useScheduler();
+  const { createRecurrence, updateRecurrence } = useScheduler();
   const { tracks: libraryTracks, loaded: libraryLoaded, loading: libraryLoading } = useLibrary();
   const { definitions, loaded: requestShowLoaded, loading: requestShowLoading } = useRequestShow();
   const timeZone = station?.timezone ?? '';
@@ -81,8 +81,8 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
   const [programDefinitionId, setProgramDefinitionId] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [retryRecurrenceId, setRetryRecurrenceId] = useState<string | null>(null);
-  const savedRecurrenceIdRef = useRef<string | null>(null);
+  const [writeStarted, setWriteStarted] = useState(false);
+  const writeStartedRef = useRef(false);
 
   const eligibleTracks = useMemo(
     () => libraryTracks.filter((track) => isValidDurationMs(track.durationMs)),
@@ -198,7 +198,7 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
   };
 
   const handleSave = async () => {
-    savedRecurrenceIdRef.current = null;
+    if (writeStartedRef.current) return;
 
     if (!timeZone) {
       setError('Station timezone is not configured.');
@@ -241,9 +241,10 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
         activeUntilLocalDate: activeUntil || undefined,
       };
 
+      writeStartedRef.current = true;
+      setWriteStarted(true);
       setSaving(true);
       setError(null);
-      setRetryRecurrenceId(null);
 
       const savedRecurrence =
         mode === 'create'
@@ -252,10 +253,6 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
             ? await updateRecurrence(recurrence.recurrenceId, input)
             : null;
 
-      if (savedRecurrence) {
-        savedRecurrenceIdRef.current = savedRecurrence.recurrenceId;
-      }
-
       if (sourceType === 'dynamic-program' && savedRecurrence) {
         await materializeDynamicProgram(savedRecurrence);
       }
@@ -263,51 +260,10 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
       onClose();
     } catch (saveError) {
       if (saveError instanceof ScheduleBatchPartialError) {
-        setRetryRecurrenceId(saveError.result.recurrence.recurrenceId);
         const failed = saveError.result.batch.failedEvents.map((event) => event.eventId).join(', ');
         setError(`${saveError.message}${failed ? ` Failed event IDs: ${failed}.` : ''}`);
       } else {
-        if (savedRecurrenceIdRef.current) {
-          setRetryRecurrenceId(savedRecurrenceIdRef.current);
-        }
         setError(saveError instanceof Error ? saveError.message : 'Failed to save recurrence.');
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRetryEvents = async () => {
-    if (!retryRecurrenceId) return;
-
-    setSaving(true);
-    setError(null);
-
-    try {
-      const result = await retryRecurrenceEvents(retryRecurrenceId);
-      if (result.batch.status !== 'all-published' || result.deleteFailures.length > 0) {
-        throw new ScheduleBatchPartialError(result);
-      }
-
-      const savedRecurrence = getRecurrence(retryRecurrenceId);
-      if (!savedRecurrence) {
-        throw new Error('Saved recurrence is no longer available.');
-      }
-
-      if (sourceType === 'dynamic-program') {
-        await materializeDynamicProgram(savedRecurrence);
-      }
-
-      setRetryRecurrenceId(null);
-      onClose();
-    } catch (retryError) {
-      if (retryError instanceof ScheduleBatchPartialError) {
-        const failed = retryError.result.batch.failedEvents
-          .map((event) => event.eventId)
-          .join(', ');
-        setError(`${retryError.message}${failed ? ` Failed event IDs: ${failed}.` : ''}`);
-      } else {
-        setError(retryError instanceof Error ? retryError.message : 'Retry failed.');
       }
     } finally {
       setSaving(false);
@@ -472,17 +428,9 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
         </p>
 
         {error && <p className="form-error">{error}</p>}
-
-        {retryRecurrenceId ? (
-          <button
-            className="button button--primary"
-            type="button"
-            onClick={handleRetryEvents}
-            disabled={saving}
-          >
-            {saving ? 'Retrying…' : 'Retry Failed Events'}
-          </button>
-        ) : null}
+        {error && writeStarted && (
+          <p>Check the saved schedule before starting another publication.</p>
+        )}
 
         <div className="form-actions">
           <button
@@ -499,6 +447,7 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
             onClick={handleSave}
             disabled={
               saving ||
+              writeStarted ||
               !timeZone ||
               !title.trim() ||
               (sourceType === 'playlist' && (!playlistId || !versionId)) ||
@@ -506,7 +455,15 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
                 (!programDefinitionId || !libraryLoaded || !requestShowLoaded || !likesReady))
             }
           >
-            {saving ? 'Compiling…' : mode === 'create' ? 'Create Recurrence' : 'Save Recurrence'}
+            {saving ? (
+              <>
+                <Spinner /> Compiling
+              </>
+            ) : mode === 'create' ? (
+              'Create Recurrence'
+            ) : (
+              'Save Recurrence'
+            )}
           </button>
         </div>
         {sourceType === 'dynamic-program' &&

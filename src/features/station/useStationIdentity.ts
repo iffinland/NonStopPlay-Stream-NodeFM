@@ -10,7 +10,7 @@
  * ============================================================ */
 
 import { useAuth } from '../../app/providers/authContext';
-import { NODEFM_APP_NAME } from '../../qortium/navigation';
+import { getCanonicalNodeFmAppIdentity } from '../../qortium/navigation';
 import { useStation } from './stationContext';
 
 export type StationIdentity = {
@@ -27,7 +27,7 @@ export function useStationIdentity(): StationIdentity {
   const publisherName =
     station?.publisherName?.trim() ||
     configuredPublisher?.trim() ||
-    (userAddress ? NODEFM_APP_NAME : null);
+    (userAddress ? getCanonicalNodeFmAppIdentity().name : null);
 
   return { ownerAddress, publisherName };
 }

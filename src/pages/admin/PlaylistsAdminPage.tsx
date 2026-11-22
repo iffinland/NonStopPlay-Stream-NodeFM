@@ -1,3 +1,4 @@
+import { Spinner } from '../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Playlists Admin Page
  *
@@ -159,7 +160,13 @@ export default function PlaylistsAdminPage() {
                 onClick={handleCreate}
                 disabled={creating || !newTitle.trim()}
               >
-                {creating ? 'Creating…' : 'Create'}
+                {creating ? (
+                  <>
+                    <Spinner /> Creating
+                  </>
+                ) : (
+                  'Create'
+                )}
               </button>
             </div>
           </div>

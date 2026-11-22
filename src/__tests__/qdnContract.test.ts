@@ -12,16 +12,12 @@ vi.mock('../qortium/bridge', () => ({
 }));
 
 import { sendBridgeRequest } from '../qortium/bridge';
-import { TEST_WRITE_ACCOUNT, withUnlockedTestAccount } from './support/writeGateBridge';
 import {
   decodeQdnResourcePayload,
-  deleteQdnResource,
   ensureQdnResourceReady,
   fetchQdnResourceData,
   getQdnResourceStreamUrl,
   getQdnResourceUrl,
-  publishResource,
-  resetQdnPublishCapabilityCache,
   requireQdnResourceStreamUrl,
   requireQdnResourceUrl,
   searchQdnResources,
@@ -126,7 +122,7 @@ describe('GET_QDN_RESOURCE_STREAM_URL raw string contract', () => {
     ).resolves.toBe(url);
 
     expect(mockedSend).toHaveBeenCalledWith({
-      action: 'GET_QDN_RESOURCE_STREAM_URL',
+      action: 'GET_QDN_RESOURCE_URL',
       service: 'AUDIO',
       name: 'Owner',
       identifier: 'audio-1',
@@ -271,126 +267,6 @@ describe('QDN read error classification', () => {
     expect(
       isConfirmedQdnNotFoundError(new Error('QDN error 125: identifier must not exceed 64 bytes')),
     ).toBe(false);
-  });
-});
-
-describe('QDN write request shapes', () => {
-  beforeEach(() => {
-    mockedSend.mockReset();
-    resetQdnPublishCapabilityCache();
-  });
-
-  it('publishes a Home-issued sourceToken with metadata and no refused source field', async () => {
-    mockedSend.mockImplementation(withUnlockedTestAccount(async () => ({ accepted: true })));
-
-    await publishResource({
-      service: 'JSON',
-      name: 'Owner',
-      identifier: 'nodefm-track-t1',
-      sourceToken: 'home-token-1',
-      title: 'Track',
-      description: 'A track',
-      category: 'MUSIC',
-      tags: ['chill'],
-    });
-
-    expect(mockedSend).toHaveBeenCalledWith({
-      action: 'PUBLISH_QDN_RESOURCE',
-      service: 'JSON',
-      name: 'Owner',
-      identifier: 'nodefm-track-t1',
-      sourceToken: 'home-token-1',
-      title: 'Track',
-      description: 'A track',
-      category: 'MUSIC',
-      tags: ['chill'],
-    });
-  });
-
-  it('stages app-held bytes and publishes the token Home issued', async () => {
-    mockedSend.mockImplementation(
-      withUnlockedTestAccount(async (request: Record<string, unknown>) => {
-        if (request.action === 'SHOW_ACTIONS') {
-          return ['SHOW_ACTIONS', 'STAGE_QDN_PUBLISH_SOURCE', 'PUBLISH_QDN_RESOURCE'];
-        }
-
-        if (request.action === 'STAGE_QDN_PUBLISH_SOURCE') {
-          return {
-            canceled: false,
-            fileName: request.fileName,
-            kind: 'blob',
-            mimeType: 'image/png',
-            size: 5,
-            sourceToken: 'staged-token-1',
-          };
-        }
-
-        return { accepted: true };
-      }),
-    );
-
-    await publishResource({
-      service: 'IMAGE',
-      name: 'Owner',
-      identifier: 'nodefm-cover-1',
-      bytesBase64: 'aW1hZ2U=',
-      fileName: 'cover õhtu.png',
-      mimeType: 'image/png',
-    });
-
-    const requests = mockedSend.mock.calls.map(([request]) => request as Record<string, unknown>);
-    const staged = requests.find((request) => request.action === 'STAGE_QDN_PUBLISH_SOURCE')!;
-    expect(staged).toBeDefined();
-    expect(staged.bytesBase64).toBe('aW1hZ2U=');
-    expect(staged.fileName).toBe('cover õhtu.png');
-    expect(staged.mimeType).toBe('image/png');
-
-    const publish = requests.find((request) => request.action === 'PUBLISH_QDN_RESOURCE')!;
-    expect(publish).toEqual({
-      action: 'PUBLISH_QDN_RESOURCE',
-      service: 'IMAGE',
-      name: 'Owner',
-      identifier: 'nodefm-cover-1',
-      sourceToken: 'staged-token-1',
-    });
-  });
-
-  it('fails closed instead of falling back to the refused inline contract', async () => {
-    mockedSend.mockImplementation(async (request: Record<string, unknown>) => {
-      if (request.action === 'GET_SELECTED_ACCOUNT') return { ...TEST_WRITE_ACCOUNT };
-      if (request.action === 'SHOW_ACTIONS') {
-        return ['SHOW_ACTIONS', 'PUBLISH_QDN_RESOURCE', 'SELECT_QDN_PUBLISH_SOURCE'];
-      }
-
-      throw new Error('unexpected action');
-    });
-
-    await expect(
-      publishResource({
-        service: 'JSON',
-        name: 'Owner',
-        identifier: 'nodefm-track-t1',
-        bytesBase64: 'e30=',
-        fileName: 'nodefm-track-t1.json',
-      }),
-    ).rejects.toThrow(/STAGE_QDN_PUBLISH_SOURCE/);
-  });
-
-  it('deletes only the requested resource identifier', async () => {
-    mockedSend.mockImplementation(withUnlockedTestAccount(async () => ({ accepted: true })));
-
-    await deleteQdnResource({
-      service: 'JSON',
-      name: 'Owner',
-      identifier: 'nodefm-track-t1',
-    });
-
-    expect(mockedSend).toHaveBeenCalledWith({
-      action: 'DELETE_QDN_RESOURCE',
-      service: 'JSON',
-      name: 'Owner',
-      identifier: 'nodefm-track-t1',
-    });
   });
 });
 

@@ -1,3 +1,4 @@
+import { Spinner } from '../../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Add QDN Flow
  *
@@ -5,7 +6,7 @@
  * station library without duplicating the media.
  * ============================================================ */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { LoadingState } from '../../../components/LoadingState';
 import { ErrorState } from '../../../components/ErrorState';
 import { Modal } from '../../../components/Modal';
@@ -29,12 +30,10 @@ import {
 } from '../../metadata-intelligence';
 import { publishNewTrackWithCover, readCoverFile } from '../services/coverService';
 import { buildAddQdnTrackInput } from '../services/addQdnService';
+import { qdnAudioDetails, parseManualAudioDuration } from '../services/qdnAudioDetails';
+import { resolveQdnAudioDuration } from '../../../utils/qdnAudioDuration';
 import { createTrack } from '../../tracks/services/trackService';
-import {
-  resolveAudioDurationFromUrl,
-  formatDurationMs,
-  isValidDurationMs,
-} from '../../../utils/duration';
+import { formatDurationMs, isValidDurationMs } from '../../../utils/duration';
 import type { QdnResourceInfo } from '../../../qortium/qdn';
 
 type Step = 'search' | 'confirm' | 'metadata' | 'importing' | 'done' | 'error';
@@ -48,6 +47,7 @@ type State = {
   selected: QdnResourceInfo | null;
   durationMs: number | null;
   durationResolving: boolean;
+  manualDuration: string;
   title: string;
   artist: string;
   album: string;
@@ -70,6 +70,8 @@ export function AddQdnFlow({
 }) {
   const { ownerAddress, publisherName } = useStationIdentity();
   const { remember, genres: genreSuggestions, tags: tagSuggestions } = useTaxonomy();
+  const durationRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => durationRequest.current?.abort(), []);
   const [publication, setPublication] = useState<PublicationProgressState | null>(null);
 
   const [state, setState] = useState<State>({
@@ -81,6 +83,7 @@ export function AddQdnFlow({
     selected: null,
     durationMs: null,
     durationResolving: false,
+    manualDuration: '',
     title: '',
     artist: '',
     album: '',
@@ -119,41 +122,56 @@ export function AddQdnFlow({
   }, [state.searchQuery]);
 
   const handleSelect = useCallback(async (resource: QdnResourceInfo) => {
+    durationRequest.current?.abort();
+    const request = new AbortController();
+    durationRequest.current = request;
+    const details = qdnAudioDetails(resource);
     setState((s) => ({
       ...s,
+      ...details,
       step: 'confirm',
       selected: resource,
       durationResolving: true,
-      title: resource.metadata?.title ?? resource.name ?? '',
-      artist: '',
-      album: '',
-      releaseDate: '',
       durationMs: null,
+      manualDuration: '',
       coverFile: null,
       coverBytesBase64: null,
       coverWarning: null,
+      error: null,
     }));
-
-    // Resolve duration
     try {
       const ref = {
         service: resource.service,
         name: resource.name,
         identifier: resource.identifier,
       };
-
       await ensureQdnResourceReady(ref);
+      if (request.signal.aborted) return;
       const url = await getQdnResourceUrl(ref);
-      const durationMs = await resolveAudioDurationFromUrl(url);
-      setState((s) => ({ ...s, durationMs, durationResolving: false }));
+      const durationMs = await resolveQdnAudioDuration(url, request.signal);
+      if (!request.signal.aborted)
+        setState((s) => ({ ...s, durationMs, durationResolving: false, error: null }));
     } catch {
-      setState((s) => ({
-        ...s,
-        durationResolving: false,
-        error: 'Unable to resolve audio duration. The resource may not be playable.',
-      }));
+      if (!request.signal.aborted)
+        setState((s) => ({
+          ...s,
+          durationResolving: false,
+          error:
+            'Automatic duration detection failed. Retry, or enter the correct duration below to add this track.',
+        }));
     }
   }, []);
+
+  const setManualDuration = (value: string) => {
+    durationRequest.current?.abort();
+    setState((s) => ({
+      ...s,
+      manualDuration: value,
+      durationMs: parseManualAudioDuration(value),
+      durationResolving: false,
+      error: null,
+    }));
+  };
 
   const handleCoverSelected = useCallback(async (file: File) => {
     try {
@@ -215,7 +233,7 @@ export function AddQdnFlow({
       const track = createTrack(
         buildAddQdnTrackInput({
           title: state.title || state.selected.name || 'Untitled',
-          artist: state.artist || state.selected.metadata?.title || undefined,
+          artist: state.artist || undefined,
           album: state.album || undefined,
           releaseDate: state.releaseDate || undefined,
           description: state.description || undefined,
@@ -354,8 +372,9 @@ export function AddQdnFlow({
             {!state.searching && state.results.length > 0 && (
               <div className="add-qdn__results">
                 {state.results.map((r) => (
-                  <div
-                    key={`${r.service}-${r.name}`}
+                  <button
+                    type="button"
+                    key={`${r.service}-${r.name}-${r.identifier ?? 'default'}`}
                     className="add-qdn__result-item"
                     onClick={() => handleSelect(r)}
                   >
@@ -364,9 +383,21 @@ export function AddQdnFlow({
                       {r.metadata?.description && (
                         <span className="add-qdn__result-desc">{r.metadata.description}</span>
                       )}
-                      <span className="add-qdn__result-service">{r.service}</span>
+                      <span className="add-qdn__result-service">
+                        {r.service} · Publisher: {r.name} · ID: {r.identifier || 'default'}
+                      </span>
+                      {qdnAudioDetails(r).artist && (
+                        <span>Artist: {qdnAudioDetails(r).artist}</span>
+                      )}
+                      {qdnAudioDetails(r).album && <span>Album: {qdnAudioDetails(r).album}</span>}
+                      {r.metadata?.tags?.length ? (
+                        <span>Tags: {r.metadata.tags.join(', ')}</span>
+                      ) : null}
+                      {r.metadata?.category && <span>Category: {r.metadata.category}</span>}
+                      {r.size != null && <span>Size: {(r.size / 1024 / 1024).toFixed(2)} MiB</span>}
+                      {r.status?.status && <span>Status: {r.status.status}</span>}
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -382,8 +413,24 @@ export function AddQdnFlow({
             <h3>Selected Resource</h3>
             <div className="add-qdn__resource-detail">
               <p>
-                <strong>Name:</strong> {state.selected.metadata?.title ?? state.selected.name}
+                <strong>Title:</strong> {state.title}
               </p>
+              <p>
+                <strong>Publisher:</strong> {state.selected.name}
+              </p>
+              <p>
+                <strong>Identifier:</strong> {state.selected.identifier || 'default'}
+              </p>
+              {state.artist && (
+                <p>
+                  <strong>Artist:</strong> {state.artist}
+                </p>
+              )}
+              {state.album && (
+                <p>
+                  <strong>Album:</strong> {state.album}
+                </p>
+              )}
               <p>
                 <strong>Service:</strong> {state.selected.service}
               </p>
@@ -394,21 +441,49 @@ export function AddQdnFlow({
               )}
               <p>
                 <strong>Duration:</strong>{' '}
-                {state.durationResolving
-                  ? 'Resolving…'
-                  : state.durationMs !== null
-                    ? formatDurationMs(state.durationMs)
-                    : 'Unknown'}
+                {state.durationResolving ? (
+                  <>
+                    <Spinner /> Resolving
+                  </>
+                ) : state.durationMs !== null ? (
+                  formatDurationMs(state.durationMs)
+                ) : (
+                  'Unknown'
+                )}
               </p>
             </div>
 
             {state.error && <p className="form-error">{state.error}</p>}
+            <label className="form-field">
+              Duration (m:ss or h:mm:ss)
+              <input
+                type="text"
+                placeholder="3:45"
+                value={state.manualDuration}
+                onChange={(e) => setManualDuration(e.target.value)}
+              />
+            </label>
+            <p className="form-hint">Use the actual track length; this controls station timing.</p>
+            {state.manualDuration && state.durationMs === null && (
+              <p className="form-error">Enter a positive duration, for example 3:45.</p>
+            )}
+            <button
+              className="button button--secondary"
+              type="button"
+              disabled={state.durationResolving}
+              onClick={() => state.selected && void handleSelect(state.selected)}
+            >
+              Retry automatic duration
+            </button>
 
             <div className="form-actions">
               <button
                 className="button button--secondary"
                 type="button"
-                onClick={() => setState((s) => ({ ...s, step: 'search' }))}
+                onClick={() => {
+                  durationRequest.current?.abort();
+                  setState((s) => ({ ...s, step: 'search', durationResolving: false }));
+                }}
               >
                 Back to Search
               </button>
@@ -416,11 +491,7 @@ export function AddQdnFlow({
                 className="button button--primary"
                 type="button"
                 onClick={() => setState((s) => ({ ...s, step: 'metadata' }))}
-                disabled={
-                  state.durationResolving ||
-                  state.durationMs === null ||
-                  !isValidDurationMs(state.durationMs)
-                }
+                disabled={state.durationResolving}
               >
                 Add Metadata
               </button>
@@ -431,6 +502,25 @@ export function AddQdnFlow({
         {state.step === 'metadata' && (
           <div className="add-qdn__metadata">
             <h3>Track Metadata</h3>
+            <p>
+              Duration:{' '}
+              {state.durationMs !== null
+                ? formatDurationMs(state.durationMs)
+                : 'Unknown — enter the correct duration to publish.'}
+            </p>
+            <label className="form-field">
+              Duration (m:ss or h:mm:ss)
+              <input
+                type="text"
+                placeholder="3:45"
+                value={state.manualDuration}
+                onChange={(e) => setManualDuration(e.target.value)}
+              />
+            </label>
+            <p className="form-hint">Use the actual track length; this controls station timing.</p>
+            {state.manualDuration && state.durationMs === null && (
+              <p className="form-error">Enter a positive duration, for example 3:45.</p>
+            )}
 
             <label className="form-field">
               Title
@@ -555,17 +645,7 @@ export function AddQdnFlow({
         )}
 
         {state.step === 'error' && (
-          <ErrorState
-            message="Import failed"
-            detail={state.error ?? undefined}
-            onRetry={() =>
-              setState((s) => ({
-                ...s,
-                step: state.selected ? 'confirm' : 'search',
-                error: null,
-              }))
-            }
-          />
+          <ErrorState message="Import failed" detail={state.error ?? undefined} />
         )}
       </>
     </Modal>

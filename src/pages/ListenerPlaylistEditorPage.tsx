@@ -1,3 +1,4 @@
+import { Spinner } from '../components/Spinner';
 /* ============================================================
  * NodeFM Station — Listener Playlist Editor Page
  *
@@ -619,7 +620,13 @@ export default function ListenerPlaylistEditorPage() {
             onClick={handlePublish}
             disabled={busy || !publication?.publishable}
           >
-            {busy ? 'Publishing…' : 'Publish Playlist'}
+            {busy ? (
+              <>
+                <Spinner /> Publishing
+              </>
+            ) : (
+              'Publish Playlist'
+            )}
           </button>
         </div>
 

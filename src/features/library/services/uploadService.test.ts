@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { publishMultipleResources } from '../../../qortium/qdn';
-import { trackPublishResource } from './libraryService';
+import { trackPublishResource, upsertTrackLocally } from './libraryService';
 import { buildTrackCoverPublishResource } from './coverService';
 import {
   buildUploadAudioPublishResource,
@@ -15,6 +15,7 @@ vi.mock('../../../qortium/qdn', () => ({
 
 vi.mock('./libraryService', () => ({
   trackPublishResource: vi.fn(),
+  upsertTrackLocally: vi.fn(),
 }));
 
 vi.mock('./coverService', () => ({
@@ -26,11 +27,11 @@ const mockedTrackPublishResource = vi.mocked(trackPublishResource);
 const mockedBuildCover = vi.mocked(buildTrackCoverPublishResource);
 
 describe('buildUploadAudioPublishResource', () => {
-  it('publishes the AUDIO item with a Home-issued sourceToken only', () => {
+  it('publishes the AUDIO item with the selected browser File', () => {
     const resource = buildUploadAudioPublishResource({
       publisherName: 'NodeFM',
       audioIdentifier: 'nodefm-audio-1',
-      audioSourceToken: 'token-1',
+      audioFile: new File(['audio'], 'song.mp3', { type: 'audio/mpeg' }),
       title: 'Song',
     });
 
@@ -38,7 +39,8 @@ describe('buildUploadAudioPublishResource', () => {
       service: 'AUDIO',
       name: 'NodeFM',
       identifier: 'nodefm-audio-1',
-      sourceToken: 'token-1',
+      file: expect.any(Blob),
+      fileName: 'song.mp3',
       title: 'Song',
     });
   });
@@ -82,7 +84,7 @@ describe('publishUploadMediaResources', () => {
     const result = await publishUploadMediaResources({
       publisherName: 'NodeFM',
       audioIdentifier: 'nodefm-audio-1',
-      audioSourceToken: 'token-1',
+      audioFile: new File(['audio'], 'song.mp3', { type: 'audio/mpeg' }),
       title: 'Song',
       cover: {
         publisherName: 'NodeFM',
@@ -96,7 +98,7 @@ describe('publishUploadMediaResources', () => {
     const resources = mockedBatchPublish.mock.calls[0][0];
     expect(resources).toHaveLength(2);
     expect(resources[0]).toEqual(
-      expect.objectContaining({ service: 'AUDIO', sourceToken: 'token-1' }),
+      expect.objectContaining({ service: 'AUDIO', file: expect.any(Blob), fileName: 'song.mp3' }),
     );
     expect(resources[1]).toEqual(expect.objectContaining({ service: 'IMAGE' }));
     expect(result.audioPublished).toBe(true);
@@ -139,7 +141,7 @@ describe('publishUploadMediaResources', () => {
     const result = await publishUploadMediaResources({
       publisherName: 'NodeFM',
       audioIdentifier: 'nodefm-audio-1',
-      audioSourceToken: 'token-1',
+      audioFile: new File(['audio'], 'song.mp3', { type: 'audio/mpeg' }),
       title: 'Song',
       cover: {
         publisherName: 'NodeFM',
@@ -155,6 +157,7 @@ describe('publishUploadMediaResources', () => {
 });
 
 describe('publishUploadTrackMetadata', () => {
+  beforeEach(() => vi.mocked(upsertTrackLocally).mockClear());
   it('publishes the Track JSON resource and succeeds when Home returns it', async () => {
     mockedBatchPublish.mockReset();
     mockedTrackPublishResource.mockReset();
@@ -195,6 +198,7 @@ describe('publishUploadTrackMetadata', () => {
     } as never;
 
     await publishUploadTrackMetadata(track, 'NodeFM');
+    expect(upsertTrackLocally).toHaveBeenCalledWith(track);
 
     expect(mockedBatchPublish).toHaveBeenCalledWith([
       expect.objectContaining({ service: 'JSON', identifier: 'nodefm-track-t1' }),

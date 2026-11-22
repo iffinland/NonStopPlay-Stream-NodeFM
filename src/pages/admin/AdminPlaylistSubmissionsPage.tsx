@@ -1,3 +1,4 @@
+import { Spinner } from '../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Admin Playlist Submissions Page
  *
@@ -316,7 +317,6 @@ export default function AdminPlaylistSubmissionsPage() {
                     setTransaction(null);
                     setAction(null);
                   }}
-                  onRetry={() => void runAction()}
                 />
               ) : (
                 <>
@@ -358,7 +358,15 @@ export default function AdminPlaylistSubmissionsPage() {
                       onClick={() => void runAction()}
                       disabled={actionBusy}
                     >
-                      {actionBusy ? 'Saving…' : action.type === 'accept' ? 'Accept' : 'Reject'}
+                      {actionBusy ? (
+                        <>
+                          <Spinner /> Saving
+                        </>
+                      ) : action.type === 'accept' ? (
+                        'Accept'
+                      ) : (
+                        'Reject'
+                      )}
                     </button>
                   </div>
                 </>

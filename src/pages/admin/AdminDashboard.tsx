@@ -1,3 +1,4 @@
+import { Spinner } from '../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Admin Dashboard
  *
@@ -91,7 +92,9 @@ export default function AdminDashboard() {
     if (resolution.status === 'loading') {
       return (
         <>
-          <p className="admin-dashboard__value">…</p>
+          <p className="admin-dashboard__value">
+            <Spinner />
+          </p>
           <p className="admin-dashboard__hint">{resolution.hint}</p>
         </>
       );

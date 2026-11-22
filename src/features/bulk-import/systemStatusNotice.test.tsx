@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { SystemStatusNotice } from './components/SystemStatusNotice';
-import { ChecklistResourceItem } from './components/BulkImportWorkspace';
 
 function renderTone(tone: 'info' | 'success' | 'warning' | 'error') {
   return renderToStaticMarkup(
@@ -53,24 +52,5 @@ describe('SystemStatusNotice', () => {
       <SystemStatusNotice tone="error" title="Publication failed" detail="Try again." />,
     );
     expect(html).toContain('role="alert"');
-  });
-});
-
-describe('publication checklist item', () => {
-  it('shows the next required action for a pending cover step', () => {
-    const html = renderToStaticMarkup(
-      <ChecklistResourceItem
-        label="Cover"
-        state="native-source-required"
-        message="Select the cover image you added to this Track."
-        capabilityReady
-        actionLabel="Select cover file"
-        onAction={() => undefined}
-      />,
-    );
-
-    expect(html).toContain('Select cover file');
-    expect(html).toContain('system-status--warning');
-    expect(html).toContain('Cover source required.');
   });
 });

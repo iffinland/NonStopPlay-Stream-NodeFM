@@ -2,7 +2,7 @@
  * NodeFM Station — Submit Music Form
  *
  * Public listener-facing submission flow. The listener selects audio
- * once through SELECT_QDN_PUBLISH_SOURCE, then NodeFM publishes the
+ * once through the browser file picker, then NodeFM publishes the
  * listener-owned AUDIO and JSON submission proposal. No submission
  * metadata is published until a positive duration is resolved.
  * ============================================================ */
@@ -77,7 +77,7 @@ export function SubmitMusicForm({
 
   // A lock-state-only auth refresh is not an identity change: the last
   // resolved account is held through the transient loading state so an
-  // authored draft and any in-flight publication survive Home locking and
+  // authored draft and any in-flight publication survive Hub permission dialogs and
   // unlocking the wallet.
   const identity = useStableAccountIdentity(auth);
   const submitterName = identity?.name.trim() || null;
@@ -111,7 +111,7 @@ export function SubmitMusicForm({
     if (!submitterName) {
       setState((current) => ({
         ...current,
-        error: 'A registered Qortium name is required to submit music.',
+        error: 'A registered Qortal name is required to submit music.',
       }));
       return;
     }
@@ -171,7 +171,7 @@ export function SubmitMusicForm({
       setState((current) => ({
         ...current,
         error: !submitterName
-          ? 'A registered Qortium name is required to submit music.'
+          ? 'A registered Qortal name is required to submit music.'
           : !submitterAddress
             ? 'An authenticated account is required to submit music.'
             : 'Select an audio file before submitting.',
@@ -319,14 +319,14 @@ export function SubmitMusicForm({
   // screen. A lock-state refresh keeps the resolved identity, so the draft and
   // any in-flight publication progress stay mounted.
   if (auth.status === 'loading' && !identity) {
-    return <LoadingState message="Checking Qortium identity…" />;
+    return <LoadingState message="Checking Qortal identity…" />;
   }
 
   if (auth.status === 'unauthenticated') {
     return (
       <ErrorState
         message="Sign in to submit music"
-        detail="Select a Qortium account in Home before submitting music to NodeFM."
+        detail="Select a Qortal account in Hub before submitting music to NodeFM."
       />
     );
   }
@@ -334,8 +334,8 @@ export function SubmitMusicForm({
   if (!submitterName) {
     return (
       <ErrorState
-        message="A registered Qortium name is required"
-        detail="Your selected account does not have a registered Qortium name, which is required to publish QDN resources."
+        message="A registered Qortal name is required"
+        detail="Your selected account does not have a registered Qortal name, which is required to publish QDN resources."
       />
     );
   }
@@ -366,7 +366,7 @@ export function SubmitMusicForm({
       <div className="submit-music__intro">
         <p>
           Submit music for possible inclusion in NodeFM Station. Your audio stays published under
-          your Qortium name. The station owner reviews each submission before it can enter the
+          your Qortal name. The station owner reviews each submission before it can enter the
           station library.
         </p>
       </div>

@@ -33,14 +33,6 @@ export function BulkImportSummary({
             {formatMib(limits.selectedBytes)} MiB / {formatMib(BULK_IMPORT_MAX_TOTAL_BYTES)} MiB
           </span>
         </div>
-        <div className="bulk-import__meter-item">
-          <span className="bulk-import__meter-label">Remaining tracks</span>
-          <span className="bulk-import__meter-value">{limits.remainingCount}</span>
-        </div>
-        <div className="bulk-import__meter-item">
-          <span className="bulk-import__meter-label">Remaining size</span>
-          <span className="bulk-import__meter-value">{formatMib(limits.remainingBytes)} MiB</span>
-        </div>
       </div>
 
       <div className="bulk-import__counts">
@@ -58,7 +50,7 @@ export function BulkImportSummary({
 
       <div className="bulk-import__capability">
         <span className="bulk-import__capability-badge">
-          {capabilityStatus === 'available' ? 'A2 ready' : 'A2 pending'}
+          {capabilityStatus === 'available' ? 'Ready' : 'Unavailable'}
         </span>
         <span>{capabilityMessage}</span>
       </div>

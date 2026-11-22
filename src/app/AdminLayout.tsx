@@ -51,6 +51,9 @@ export function AdminLayout() {
       </aside>
 
       <main className="admin__main">
+        <Link to="/" className="admin__mobile-back-link">
+          ← Back to Station
+        </Link>
         <Outlet />
       </main>
     </div>

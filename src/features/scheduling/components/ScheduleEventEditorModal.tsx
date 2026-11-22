@@ -1,3 +1,4 @@
+import { Spinner } from '../../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Schedule Event Editor Modal
  *
@@ -366,7 +367,6 @@ export function ScheduleEventEditorModal({
             setTransaction(null);
             if (transaction.phase === 'success') onClose();
           }}
-          onRetry={() => void handleDelete()}
         />
       ) : (
         <div className="schedule-editor">
@@ -521,13 +521,19 @@ export function ScheduleEventEditorModal({
                   (!programDefinitionId || !libraryLoaded || !requestShowLoaded || !likesReady))
               }
             >
-              {saving
-                ? 'Saving…'
-                : mode === 'create'
-                  ? sourceType === 'dynamic-program'
-                    ? 'Schedule & Generate'
-                    : 'Schedule Program'
-                  : 'Save Changes'}
+              {saving ? (
+                <>
+                  <Spinner /> Saving
+                </>
+              ) : mode === 'create' ? (
+                sourceType === 'dynamic-program' ? (
+                  'Schedule & Generate'
+                ) : (
+                  'Schedule Program'
+                )
+              ) : (
+                'Save Changes'
+              )}
             </button>
           </div>
           {sourceType === 'dynamic-program' &&

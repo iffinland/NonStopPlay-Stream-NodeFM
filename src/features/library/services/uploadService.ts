@@ -1,20 +1,4 @@
-/* ============================================================
- * NodeFM Station — Upload Audio Publication Service
- *
- * Scoped service for the owner "Upload Audio" flow. It prepares the
- * AUDIO (Home-issued sourceToken from SELECT_QDN_PUBLISH_SOURCE) and
- * optional IMAGE (app-held bytes staged with STAGE_QDN_PUBLISH_SOURCE)
- * resources as one `PUBLISH_MULTIPLE_QDN_RESOURCES` approval, then
- * publishes the final Track JSON metadata in a second approval after the
- * audio duration has been resolved from the now-published AUDIO resource.
- *
- * Home 1.8.0's SELECT_QDN_PUBLISH_SOURCE returns only a sourceToken,
- * file name, kind, and size. It deliberately does not return file
- * bytes or a local path, so duration cannot be read from the selected
- * source before publication while still using the sourceToken
- * transport. That is the specific runtime boundary that prevents one
- * single approval for the complete Track.
- * ============================================================ */
+/** Publish selected Qortal media, then its verified Track metadata. */
 
 import {
   publishMultipleResources,
@@ -23,12 +7,12 @@ import {
 } from '../../../qortium/qdn';
 import type { QdnResourceRef, Track } from '../../../types/domain';
 import { buildTrackCoverPublishResource, type PublishTrackCoverInput } from './coverService';
-import { trackPublishResource } from './libraryService';
+import { trackPublishResource, upsertTrackLocally } from './libraryService';
 
 export type PublishUploadMediaResourcesInput = {
   publisherName: string;
   audioIdentifier: string;
-  audioSourceToken: string;
+  audioFile: File;
   title: string;
   cover?: PublishTrackCoverInput;
 };
@@ -62,26 +46,26 @@ function publishedIdentifier(
 export function buildUploadAudioPublishResource(input: {
   publisherName: string;
   audioIdentifier: string;
-  audioSourceToken: string;
+  audioFile: File;
   title: string;
 }): PublishMultipleResource {
   if (!input.publisherName.trim()) {
-    throw new Error('A registered Qortium name is required to publish audio.');
+    throw new Error('A registered Qortal name is required to publish audio.');
   }
 
   if (!input.audioIdentifier.trim()) {
     throw new Error('An audio identifier is required to publish audio.');
   }
 
-  if (!input.audioSourceToken.trim()) {
-    throw new Error('An audio source token is required to publish audio.');
-  }
+  if (!input.audioFile || input.audioFile.size <= 0)
+    throw new Error('Select an audio file before publishing.');
 
   return {
     service: 'AUDIO',
     name: input.publisherName.trim(),
     identifier: input.audioIdentifier.trim(),
-    sourceToken: input.audioSourceToken.trim(),
+    file: input.audioFile,
+    fileName: input.audioFile.name,
     title: input.title.trim(),
   };
 }
@@ -96,7 +80,7 @@ export async function publishUploadMediaResources(
   const audioResource = buildUploadAudioPublishResource({
     publisherName: input.publisherName,
     audioIdentifier: input.audioIdentifier,
-    audioSourceToken: input.audioSourceToken,
+    audioFile: input.audioFile,
     title: input.title,
   });
 
@@ -147,4 +131,5 @@ export async function publishUploadTrackMetadata(
       }`,
     );
   }
+  upsertTrackLocally(track);
 }

@@ -1,3 +1,4 @@
+import { Spinner } from '../components/Spinner';
 /* ============================================================
  * NodeFM Station — Listener Playlist Detail Page
  *
@@ -197,7 +198,13 @@ export default function ListenerPlaylistDetailPage() {
             onClick={() => startPlayback(false)}
             disabled={resolvingAudio}
           >
-            {resolvingAudio ? 'Preparing audio…' : 'Play'}
+            {resolvingAudio ? (
+              <>
+                <Spinner /> Preparing audio
+              </>
+            ) : (
+              'Play'
+            )}
           </button>
           <button
             className="button button--secondary"

@@ -1,3 +1,4 @@
+import { Spinner } from '../../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Tip Owner Modal
  *
@@ -103,7 +104,13 @@ export function TipOwnerModal({ station, onClose }: Props) {
           onClick={handleTip}
           disabled={sending || !amount.trim() || !canTip}
         >
-          {sending ? 'Waiting for approval…' : 'Send Tip'}
+          {sending ? (
+            <>
+              <Spinner /> Waiting for approval
+            </>
+          ) : (
+            'Send Tip'
+          )}
         </button>
       </div>
     </Modal>

@@ -1,3 +1,4 @@
+import { Spinner } from '../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Messages Page (Admin)
  *
@@ -50,7 +51,13 @@ export default function MessagesPage() {
               onClick={handleOpenChat}
               disabled={opening || station?.messagingEnabled === false}
             >
-              {opening ? 'Opening…' : 'Open Qortium Chat'}
+              {opening ? (
+                <>
+                  <Spinner /> Opening
+                </>
+              ) : (
+                'Open Qortium Chat'
+              )}
             </button>
           </>
         )}

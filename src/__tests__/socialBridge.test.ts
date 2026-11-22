@@ -127,14 +127,14 @@ describe('QDN navigation helpers', () => {
     mockedSend.mockReset();
   });
 
-  it('builds canonical qdn:// addresses', () => {
+  it('builds canonical qortal:// addresses', () => {
     expect(
       buildQdnUrl({
         service: 'PLAYLIST',
         name: 'Learning DEV - iffi',
         identifier: 'nodefm-playlist-p1',
       }),
-    ).toBe('qdn://PLAYLIST/Learning%20DEV%20-%20iffi/nodefm-playlist-p1');
+    ).toBe('qortal://PLAYLIST/Learning%20DEV%20-%20iffi/nodefm-playlist-p1');
   });
 
   it('reads app identity from QDN host globals', () => {
@@ -150,18 +150,16 @@ describe('QDN navigation helpers', () => {
   it('opens a new tab through the exact bridge action', async () => {
     mockedSend.mockImplementation(withUnlockedTestAccount(async () => true));
 
-    await openQdnAddress('qdn://APP/NodeFM/NodeFM', 'new');
+    await openQdnAddress('qortal://APP/NodeFM/NodeFM', 'new');
 
     expect(mockedSend).toHaveBeenCalledWith({
       action: 'OPEN_NEW_TAB',
-      address: 'qdn://APP/NodeFM/NodeFM',
+      qortalLink: 'qortal://APP/NodeFM/NodeFM',
     });
   });
 
   it('rejects unsupported navigation schemes before calling the bridge', async () => {
-    await expect(openQdnAddress('https://example.com', 'new')).rejects.toThrow(
-      /Only qdn:\/\/, home:\/\/, and core:\/\//,
-    );
+    await expect(openQdnAddress('https://example.com', 'new')).rejects.toThrow(/Only qortal:\/\//);
     expect(mockedSend).not.toHaveBeenCalled();
   });
 });

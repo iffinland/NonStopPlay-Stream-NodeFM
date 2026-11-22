@@ -7,6 +7,11 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+vi.mock('../qortium/identity', () => ({
+  getAccountNames: vi.fn(async (address: string) => [address === 'Q-b' ? 'B' : 'A']),
+  clearIdentityCaches: vi.fn(),
+}));
+
 vi.mock('../qortium/bridge', () => ({
   getSelectedAccount: vi.fn(),
   sendBridgeRequest: vi.fn(),
@@ -56,6 +61,7 @@ describe('auth account-switch guard', () => {
       status: 'authenticated',
       address: 'Q-b',
       name: 'B',
+      names: ['B'],
     });
   });
 });

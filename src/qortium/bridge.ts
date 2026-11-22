@@ -1,169 +1,93 @@
-/* ============================================================
- * NodeFM Station — Qortium Bridge
- *
- * Centralized bridge communication with Qortium Home.
- * All QDN/Home requests flow through this module.
- *
- * Adapted from the proven Qortium-native pattern used by
- * discussion-boards-reference (qortiumClient.ts) and
- * qortium-boards (qdnRequest.ts).
- *
- * Bridge: window.qdnRequest(requestObject) → Promise
- *
- * window.qdnRequest is injected by Core's q-apps.js into every
- * QDN-served page.  It uses MessageChannel internally; apps
- * call it directly as a function returning a Promise.
- * ============================================================ */
-
-// ── Types ───────────────────────────────────────────────────────────
-
+/** Qortal Core's injected Q-App transport. Kept at the existing import boundary. */
+import { isConfirmedQdnNotFoundError } from './qdnReadError';
 import { beginStartupRequest } from '../services/perf/startupDiagnostics';
 
-type PropertyRead =
-  { status: 'AVAILABLE'; value: unknown } | { status: 'UNAVAILABLE' | 'INACCESSIBLE' };
+type RequestPayload = Record<string, unknown>;
+type RequestFunction = (payload: RequestPayload) => Promise<unknown> | unknown;
+type TimedRequestFunction = (
+  payload: RequestPayload,
+  timeout: number,
+) => Promise<unknown> | unknown;
 
-export type BridgeSource = 'globalThis' | 'window' | 'parent' | 'top';
+// Core declares these as global lexical bindings, not window properties.
+declare const qortalRequest: RequestFunction | undefined;
+declare const qortalRequestWithTimeout: TimedRequestFunction | undefined;
 
-type RequestBridge = {
-  request: (payload: Record<string, unknown>) => Promise<unknown> | unknown;
-};
-
+export type BridgeSource = 'globalThis' | 'window';
 export type BridgeResolution =
   | {
       status: 'AVAILABLE';
       source: BridgeSource;
-      bridge: RequestBridge;
+      bridge: { request: RequestFunction; requestWithTimeout?: TimedRequestFunction };
     }
-  | {
-      status: 'UNAVAILABLE' | 'MALFORMED' | 'INACCESSIBLE';
-      source?: BridgeSource;
-    };
+  | { status: 'UNAVAILABLE' | 'MALFORMED' | 'INACCESSIBLE'; source?: BridgeSource };
+export class QortalResponseError extends Error {
+  constructor(
+    detail: string,
+    readonly response: unknown,
+  ) {
+    super(detail);
+    this.name = 'QortalResponseError';
+  }
+}
 
 export type BridgeErrorCode =
   | 'BRIDGE_UNAVAILABLE'
   | 'BRIDGE_MALFORMED'
   | 'BRIDGE_INACCESSIBLE'
   | 'REQUEST_TIMEOUT'
-  | 'REQUEST_FAILED';
+  | 'REQUEST_FAILED'
+  | 'ACTION_UNSUPPORTED';
 
-// ── Error ───────────────────────────────────────────────────────────
-
-export class QortiumBridgeError extends Error {
-  readonly code: BridgeErrorCode;
-
-  constructor(code: BridgeErrorCode, detail: string) {
+export class QortalBridgeError extends Error {
+  constructor(
+    readonly code: BridgeErrorCode,
+    detail: string,
+  ) {
     super(`[${code}] ${detail}`);
-    this.name = 'QortiumBridgeError';
-    this.code = code;
+    this.name = 'QortalBridgeError';
   }
 }
-
-// ── Helpers ─────────────────────────────────────────────────────────
+// Retain the old export while later port phases replace their platform imports.
+export { QortalBridgeError as QortiumBridgeError };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-function readProperty(target: unknown, property: string): PropertyRead {
-  if ((typeof target !== 'object' || target === null) && typeof target !== 'function') {
-    return { status: 'UNAVAILABLE' };
-  }
-
+export function resolveBridge(): BridgeResolution {
   try {
-    if (!Reflect.has(target, property)) {
-      return { status: 'UNAVAILABLE' };
+    if (typeof qortalRequest === 'function') {
+      return {
+        status: 'AVAILABLE',
+        source: 'globalThis',
+        bridge: {
+          request: qortalRequest,
+          requestWithTimeout:
+            typeof qortalRequestWithTimeout === 'function' ? qortalRequestWithTimeout : undefined,
+        },
+      };
     }
-
-    return { status: 'AVAILABLE', value: Reflect.get(target, property) };
+    // Some hosts expose properties instead. Never use a parent frame's bridge:
+    // its app identity and authorization context belong to a different frame.
+    if (typeof window !== 'undefined') {
+      const request = Reflect.get(window, 'qortalRequest');
+      if (typeof request === 'function') {
+        const timed = Reflect.get(window, 'qortalRequestWithTimeout');
+        return {
+          status: 'AVAILABLE',
+          source: 'window',
+          bridge: { request, requestWithTimeout: typeof timed === 'function' ? timed : undefined },
+        };
+      }
+      if (request != null) return { status: 'MALFORMED', source: 'window' };
+    }
+    return { status: 'UNAVAILABLE' };
   } catch {
     return { status: 'INACCESSIBLE' };
   }
 }
 
-function isBridgeRequestFunction(value: unknown): value is RequestBridge['request'] {
-  return typeof value === 'function';
-}
-
-function inspectBridgeProperty(target: unknown, source: BridgeSource): BridgeResolution {
-  const result = readProperty(target, 'qdnRequest');
-
-  if (result.status !== 'AVAILABLE') {
-    return { status: result.status, source };
-  }
-
-  if (!isBridgeRequestFunction(result.value)) {
-    return {
-      status: result.value === null || result.value === undefined ? 'UNAVAILABLE' : 'MALFORMED',
-      source,
-    };
-  }
-
-  return {
-    status: 'AVAILABLE',
-    source,
-    bridge: { request: result.value },
-  };
-}
-
-// ── Bridge Resolution ───────────────────────────────────────────────
-
-const CANDIDATES: BridgeSource[] = ['globalThis', 'window', 'parent', 'top'];
-
-function getCandidateTarget(source: BridgeSource): unknown {
-  switch (source) {
-    case 'globalThis':
-      return globalThis;
-    case 'window':
-      return typeof window !== 'undefined' ? window : undefined;
-    case 'parent':
-    case 'top': {
-      if (typeof window === 'undefined') return undefined;
-      const prop = readProperty(window, source);
-      return prop.status === 'AVAILABLE' ? prop.value : undefined;
-    }
-  }
-}
-
-/**
- * Resolve the Qortium bridge by searching for `qdnRequest` across
- * standard scopes: globalThis, window, window.parent, window.top.
- *
- * Matches the proven pattern from discussion-boards-reference
- * (qortiumClient.ts) and qortium-boards (qdnRequest.ts).
- */
-export function resolveBridge(): BridgeResolution {
-  let failure: Exclude<BridgeResolution, { status: 'AVAILABLE' }> = {
-    status: 'UNAVAILABLE',
-  };
-
-  for (const source of CANDIDATES) {
-    const target = getCandidateTarget(source);
-
-    if (target === undefined) {
-      if (source === 'parent' || source === 'top') {
-        // Frame reference is inaccessible (cross-origin) — record it
-        if (failure.status === 'UNAVAILABLE') {
-          failure = { status: 'INACCESSIBLE', source };
-        }
-      }
-      continue;
-    }
-
-    const resolution = inspectBridgeProperty(target, source);
-
-    if (resolution.status === 'AVAILABLE') {
-      return resolution;
-    }
-
-    if (failure.status === 'UNAVAILABLE' && resolution.status !== 'UNAVAILABLE') {
-      failure = resolution;
-    }
-  }
-
-  return failure;
-}
-
-/** Synchronously check whether the Qortium bridge is available. */
 export function isBridgeAvailable(): boolean {
   return resolveBridge().status === 'AVAILABLE';
 }
@@ -171,21 +95,11 @@ export function isBridgeAvailable(): boolean {
 // ── Request ─────────────────────────────────────────────────────────
 
 const REQUEST_TIMEOUT_MS = 120_000;
-/**
- * Signed / QDN write budget.
- *
- * A write is not a read: Home runs its own approval, then signs and broadcasts
- * one or more transactions before the bridge call returns. Measured on Home
- * 2.1.0-beta.11 against a real Qortium testnet node: a one-resource publish was
- * built and broadcast ~0.4 s after the approval click, but Home's response
- * reached the app roughly 120 s later — exactly at the read budget, so a
- * *successful* publish was reported as REQUEST_TIMEOUT and the user was left
- * with a "failed" write that had actually landed (and a retry would have
- * published it twice). Reads keep the shorter budget so a stalled read still
- * fails fast; writes get a budget that tolerates Home's signing and broadcast
- * path.
- */
-const WRITE_REQUEST_TIMEOUT_MS = 300_000;
+// Allow Hub approval and large-file upload time without retrying signed writes.
+const WRITE_REQUEST_TIMEOUT_MS = 3_600_000;
+const AUTH_REQUEST_TIMEOUT_MS = 300_000;
+// Only ported signed actions are permitted; never send Home payloads to Hub.
+
 const BRIDGE_WAIT_MS = 4_000;
 const BRIDGE_POLL_MS = 200;
 const READ_RETRY_COUNT = 2;
@@ -198,20 +112,24 @@ const READ_RETRY_DELAY_MS = 500;
 const READ_ACTIONS = new Set([
   'FETCH_QDN_RESOURCE',
   'SEARCH_QDN_RESOURCES',
+  'LIST_QDN_RESOURCES',
   'GET_QDN_RESOURCE_STATUS',
   'GET_QDN_RESOURCE_PROPERTIES',
   'GET_QDN_RESOURCE_METADATA',
   'GET_QDN_RESOURCE_URL',
-  'GET_QDN_RESOURCE_STREAM_URL',
-  'GET_QDN_BACKGROUND_AUDIO_STATUS',
   'SHOW_ACTIONS',
-  'GET_SELECTED_ACCOUNT',
+  'GET_ACCOUNT_DATA',
   'GET_ACCOUNT_NAMES',
   'GET_NAME_DATA',
-  'GET_LIST',
   'GET_BALANCE',
-  'GET_HOME_SETTINGS',
-  'FETCH_NODE_API',
+]);
+
+const SUPPORTED_ACTIONS = new Set([
+  ...READ_ACTIONS,
+  'GET_USER_ACCOUNT',
+  'OPEN_NEW_TAB',
+  'PUBLISH_QDN_RESOURCE',
+  'PUBLISH_MULTIPLE_QDN_RESOURCES',
 ]);
 
 function sleep(durationMs: number): Promise<void> {
@@ -248,34 +166,37 @@ async function waitForBridge(): Promise<Extract<BridgeResolution, { status: 'AVA
 
 function toBridgeError(
   resolution: Exclude<BridgeResolution, { status: 'AVAILABLE' }>,
-): QortiumBridgeError {
+): QortalBridgeError {
   if (resolution.status === 'MALFORMED') {
-    return new QortiumBridgeError(
+    return new QortalBridgeError(
       'BRIDGE_MALFORMED',
-      'Qortium bridge is present but not a function.',
+      'Qortal bridge is present but not a function.',
     );
   }
 
   if (resolution.status === 'INACCESSIBLE') {
-    return new QortiumBridgeError(
+    return new QortalBridgeError(
       'BRIDGE_INACCESSIBLE',
-      'Qortium bridge scope is inaccessible (cross-origin).',
+      'Qortal bridge scope is inaccessible (cross-origin).',
     );
   }
 
-  return new QortiumBridgeError('BRIDGE_UNAVAILABLE', 'Qortium Home bridge is not available.');
+  return new QortalBridgeError(
+    'BRIDGE_UNAVAILABLE',
+    'Open this app through Qortal Hub to connect to QDN.',
+  );
 }
 
 function parseRequestError(response: unknown, action: string): string | null {
   if (response === null || response === undefined) {
-    return 'Qortium request returned an empty response.';
+    return 'Qortal request returned an empty response.';
   }
 
   if (typeof response === 'string') {
     const trimmed = response.trim();
 
     if (!trimmed) {
-      return 'Qortium request returned an empty response.';
+      return 'Qortal request returned an empty response.';
     }
 
     if (trimmed.toLowerCase() === 'false' || trimmed.toLowerCase().startsWith('error')) {
@@ -288,6 +209,9 @@ function parseRequestError(response: unknown, action: string): string | null {
   if (!isRecord(response)) {
     return null;
   }
+
+  if (response.error && typeof response.error === 'object')
+    return typeof response.message === 'string' ? response.message : 'Qortal request failed.';
 
   if (typeof response.error === 'number' && Number.isInteger(response.error)) {
     const message =
@@ -313,7 +237,7 @@ function parseRequestError(response: unknown, action: string): string | null {
   }
 
   if (response.error === true || response.success === false) {
-    return 'Qortium request failed.';
+    return 'Qortal request failed.';
   }
 
   // A successful FETCH_QDN_RESOURCE payload is domain data. A valid
@@ -338,7 +262,7 @@ function toRequestError(value: unknown, action: string): Error {
 
   const parsedError = parseRequestError(value, action);
   if (parsedError) {
-    return new Error(parsedError);
+    return new QortalResponseError(parsedError, value);
   }
 
   if (isRecord(value)) {
@@ -350,22 +274,25 @@ function toRequestError(value: unknown, action: string): Error {
     return new Error(message);
   }
 
-  return new QortiumBridgeError('REQUEST_FAILED', `Qortium request ${action} failed.`);
+  return new QortalBridgeError('REQUEST_FAILED', `Qortal request ${action} failed.`);
 }
 
-/**
- * Send a request through the Qortium Home bridge.
- *
- * Uses the injected `window.qdnRequest(requestObject)` function.
- * This is the canonical bridge mechanism used by all working
- * Qortium-native dApps (discussion-boards-reference, qortium-boards).
- *
- * Read actions are retried once on transient failure.
- */
+/** Call Core's actual injected request function; retry only safe reads. */
 export async function sendBridgeRequest<T = unknown>(request: Record<string, unknown>): Promise<T> {
   const action = typeof request.action === 'string' ? request.action : 'UNKNOWN_ACTION';
+  if (!SUPPORTED_ACTIONS.has(action)) {
+    throw new QortalBridgeError(
+      'ACTION_UNSUPPORTED',
+      `${action} is not available in this Qortal version yet.`,
+    );
+  }
   const maxAttempts = READ_ACTIONS.has(action) ? READ_RETRY_COUNT + 1 : 1;
-  const timeoutMs = READ_ACTIONS.has(action) ? REQUEST_TIMEOUT_MS : WRITE_REQUEST_TIMEOUT_MS;
+  const timeoutMs =
+    action === 'GET_USER_ACCOUNT'
+      ? AUTH_REQUEST_TIMEOUT_MS
+      : READ_ACTIONS.has(action)
+        ? REQUEST_TIMEOUT_MS
+        : WRITE_REQUEST_TIMEOUT_MS;
   const service = typeof request.service === 'string' ? request.service : undefined;
   const nameFilter = typeof request.name === 'string' ? request.name : undefined;
   const identifier = typeof request.identifier === 'string' ? request.identifier : undefined;
@@ -383,7 +310,11 @@ export async function sendBridgeRequest<T = unknown>(request: Record<string, unk
 
     let didTimeout = false;
 
-    const baseRequestPromise = Promise.resolve().then(() => resolution.bridge.request(request));
+    const baseRequestPromise = Promise.resolve().then(() =>
+      resolution.bridge.requestWithTimeout
+        ? resolution.bridge.requestWithTimeout(request, timeoutMs)
+        : resolution.bridge.request(request),
+    );
 
     baseRequestPromise.catch(() => {
       if (!didTimeout) {
@@ -397,9 +328,9 @@ export async function sendBridgeRequest<T = unknown>(request: Record<string, unk
       timeoutHandle = setTimeout(() => {
         didTimeout = true;
         reject(
-          new QortiumBridgeError(
+          new QortalBridgeError(
             'REQUEST_TIMEOUT',
-            `Qortium request ${action} timed out after ${timeoutMs / 1000} seconds.`,
+            `Qortal request ${action} timed out after ${timeoutMs / 1000} seconds.`,
           ),
         );
       }, timeoutMs);
@@ -410,7 +341,7 @@ export async function sendBridgeRequest<T = unknown>(request: Record<string, unk
       const requestError = parseRequestError(response, action);
 
       if (requestError) {
-        throw new Error(requestError);
+        throw new QortalResponseError(requestError, response);
       }
 
       endRequest('success', {
@@ -419,19 +350,20 @@ export async function sendBridgeRequest<T = unknown>(request: Record<string, unk
       return response as T;
     } catch (error) {
       const completion =
-        error instanceof QortiumBridgeError && error.code === 'REQUEST_TIMEOUT'
+        error instanceof QortalBridgeError && error.code === 'REQUEST_TIMEOUT'
           ? 'timeout'
           : 'error';
       endRequest(completion, {
         detail: error instanceof Error ? error.message : undefined,
       });
 
-      if (error instanceof QortiumBridgeError && error.code === 'REQUEST_TIMEOUT') {
+      if (error instanceof QortalBridgeError && error.code === 'REQUEST_TIMEOUT') {
         throw error;
       }
 
-      if (attempt >= maxAttempts) {
-        throw toRequestError(error, action);
+      const requestError = toRequestError(error, action);
+      if (attempt >= maxAttempts || isConfirmedQdnNotFoundError(requestError)) {
+        throw requestError;
       }
 
       await sleep(READ_RETRY_DELAY_MS * attempt);
@@ -442,7 +374,7 @@ export async function sendBridgeRequest<T = unknown>(request: Record<string, unk
     }
   }
 
-  throw new QortiumBridgeError('REQUEST_FAILED', `Qortium request ${action} failed.`);
+  throw new QortalBridgeError('REQUEST_FAILED', `Qortal request ${action} failed.`);
 }
 
 // ── Convenience: QDN Resource Fetch ─────────────────────────────────
@@ -458,7 +390,7 @@ export function fetchQdnResource(
     service,
     name,
     identifier,
-    ...(path ? { path } : {}),
+    ...(path ? { filepath: path } : {}),
   });
 }
 
@@ -466,7 +398,7 @@ export function fetchQdnResource(
 
 export function getSelectedAccount(): Promise<unknown> {
   return sendBridgeRequest({
-    action: 'GET_SELECTED_ACCOUNT',
+    action: 'GET_USER_ACCOUNT',
   });
 }
 
@@ -502,6 +434,7 @@ export function getHomeSettings(): Promise<unknown> {
 declare global {
   interface Window {
     _qdnBase?: string;
+    _qdnName?: string;
   }
 }
 

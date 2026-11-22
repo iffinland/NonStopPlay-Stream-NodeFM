@@ -1,25 +1,9 @@
-/* ============================================================
- * NodeFM Station — Upload Flow
- *
- * Step-by-step wizard for uploading local audio.
- * Uses the proven Qortium large-file flow:
- * 1. SELECT_QDN_PUBLISH_SOURCE (native picker — once)
- * 2. Collect/edit metadata
- * 3. Optionally select cover (browser File → base64)
- * 4. Publish AUDIO + optional cover in one multi-resource approval
- * 5. Resolve audio duration post-publish
- * 6. Create & publish Track metadata in a second approval
- * ============================================================ */
+/** Local file → verified duration → media approval → Track metadata approval. */
 
 import { useState, useCallback, useRef } from 'react';
 import { Modal } from '../../../components/Modal';
 import { PublicationProgress } from '../../../components/PublicationProgress';
-import {
-  selectPublishSource,
-  getQdnResourceUrl,
-  ensureQdnResourceReady,
-  type SelectPublishSourceResult,
-} from '../../../qortium/qdn';
+import { selectPublishSource, type SelectPublishSourceResult } from '../../../qortium/qdn';
 import { useStationIdentity } from '../../station';
 import { TaxonomyInput, useTaxonomy, getCanonicalTaxonomyValues } from '../../taxonomy';
 import {
@@ -31,7 +15,7 @@ import {
 } from '../../metadata-intelligence';
 import { readCoverFile } from '../services/coverService';
 import { publishUploadMediaResources, publishUploadTrackMetadata } from '../services/uploadService';
-import { resolveAudioDurationFromUrl } from '../../../utils/duration';
+import { resolvePublishAudioDuration } from '../../../utils/localAudioDuration';
 import { createTrack, getAudioQdnIdentifier } from '../../tracks/services/trackService';
 
 type Step = 'select' | 'metadata' | 'publishing' | 'resolving' | 'done' | 'error';
@@ -54,7 +38,7 @@ type UploadPublicationState = {
 
 type UploadState = {
   step: Step;
-  /** Source from SELECT_QDN_PUBLISH_SOURCE — the sole audio selection */
+  /** Browser-selected audio file, retained in memory until publication */
   audioSource: SelectPublishSourceResult | null;
   durationMs: number | null;
   title: string;
@@ -97,7 +81,7 @@ export function UploadFlow({
     error: null,
   });
 
-  // ── Step 1: Native file picker (SELECT_QDN_PUBLISH_SOURCE) ──────
+  // ── Step 1: Browser file picker ──────
 
   const handleSelectAudio = useCallback(async () => {
     setState((s) => ({ ...s, error: null }));
@@ -156,11 +140,11 @@ export function UploadFlow({
       return;
     }
 
-    // Block if no registered Qortium name
+    // Block if no registered Qortal name
     if (!publisherName) {
       setState((s) => ({
         ...s,
-        error: 'A registered Qortium name is required to publish NodeFM resources.',
+        error: 'A registered Qortal name is required to publish NodeFM resources.',
       }));
       return;
     }
@@ -178,13 +162,14 @@ export function UploadFlow({
     setPublication({ phase: 'publishing', rows });
 
     try {
+      const durationMs = await resolvePublishAudioDuration(state.audioSource.file);
       const audioIdentifier = getAudioQdnIdentifier();
 
       // 1. One approval for AUDIO + optional cover IMAGE.
       const mediaResult = await publishUploadMediaResources({
         publisherName,
         audioIdentifier,
-        audioSourceToken: state.audioSource.sourceToken,
+        audioFile: state.audioSource.file,
         title: trackTitle,
         cover:
           state.coverFile && state.coverBase64
@@ -253,56 +238,6 @@ export function UploadFlow({
             }
           : current,
       );
-
-      // 2. Resolve duration from the now-published AUDIO resource.
-      let durationMs: number | null = null;
-
-      try {
-        const audioRef = {
-          service: 'AUDIO',
-          name: publisherName,
-          identifier: audioIdentifier,
-        };
-        await ensureQdnResourceReady(audioRef);
-        const url = await getQdnResourceUrl(audioRef);
-        durationMs = await resolveAudioDurationFromUrl(url);
-      } catch (durationError) {
-        durationMs = null;
-        const message =
-          durationError instanceof Error
-            ? `Audio duration could not be resolved: ${durationError.message}`
-            : 'Audio duration could not be resolved.';
-        setPublication((current) =>
-          current
-            ? {
-                phase: 'failed',
-                rows: current.rows.map((row) =>
-                  row.id === 'track' ? { ...row, status: 'failed' as const, error: message } : row,
-                ),
-                error: message,
-              }
-            : current,
-        );
-        setState((s) => ({ ...s, step: 'error', error: message }));
-        return;
-      }
-
-      if (!durationMs || durationMs <= 0) {
-        const message = 'Audio duration could not be resolved. Track metadata was not created.';
-        setPublication((current) =>
-          current
-            ? {
-                phase: 'failed',
-                rows: current.rows.map((row) =>
-                  row.id === 'track' ? { ...row, status: 'failed' as const, error: message } : row,
-                ),
-                error: message,
-              }
-            : current,
-        );
-        setState((s) => ({ ...s, step: 'error', error: message }));
-        return;
-      }
 
       // 3. Create and publish the Track metadata JSON in a second approval.
       const genres = state.genres.trim()
@@ -410,7 +345,7 @@ export function UploadFlow({
             <p className="upload-flow__hint">Supported formats: MP3, WAV, FLAC, OGG, AAC, M4A</p>
             {!publisherName && (
               <p className="upload-flow__warning">
-                ⚠️ A registered Qortium name is required to publish resources.
+                ⚠️ A registered Qortal name is required to publish resources.
               </p>
             )}
             {state.error && <p className="form-error">{state.error}</p>}
@@ -433,7 +368,7 @@ export function UploadFlow({
                 ? `${state.audioSource.fileName} (${(state.audioSource.size / 1024 / 1024).toFixed(1)} MB)`
                 : 'Not selected'}
               <br />
-              <strong>Duration:</strong> Resolved after publish
+              <strong>Duration:</strong> Checked locally before upload
             </div>
 
             <label className="form-field">

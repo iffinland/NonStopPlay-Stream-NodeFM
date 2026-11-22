@@ -18,9 +18,7 @@ import type {
   SubmissionModerationDecision,
 } from '../../../types/domain';
 import {
-  ensureQdnResourceReady,
   fetchQdnResourceData,
-  getQdnResourceUrl,
   publishMultipleResources,
   publishResource,
   searchQdnResources,
@@ -29,7 +27,7 @@ import {
 } from '../../../qortium/qdn';
 import type { PublishMultipleResource } from '../../../qortium/qdn';
 import { resolveNameWalletAddress } from '../../../qortium/identity';
-import { resolveAudioDurationFromUrl } from '../../../utils/duration';
+import { resolvePublishAudioDuration } from '../../../utils/localAudioDuration';
 import { isConfirmedQdnNotFoundError } from '../../../qortium/qdnReadError';
 import {
   getTrackById,
@@ -329,6 +327,20 @@ export async function publishListenerSubmission(
     };
   }
 
+  let durationMs: number;
+  try {
+    durationMs = await resolvePublishAudioDuration(input.audioSource.file);
+    if (!Number.isSafeInteger(durationMs) || durationMs <= 0)
+      throw new Error('Audio duration could not be resolved. Nothing was published.');
+  } catch (error) {
+    return {
+      status: 'failed',
+      reason:
+        error instanceof Error
+          ? error.message
+          : 'Audio duration could not be resolved. Nothing was published.',
+    };
+  }
   const audioIdentifier = getSubmissionAudioQdnIdentifier(input.submissionId);
   const audioRef: QdnResourceRef = {
     service: 'AUDIO',
@@ -339,7 +351,8 @@ export async function publishListenerSubmission(
     service: 'AUDIO',
     name: input.submitterName.trim(),
     identifier: audioIdentifier,
-    sourceToken: input.audioSource.sourceToken,
+    file: input.audioSource.file,
+    fileName: input.audioSource.fileName,
     title: input.title.trim(),
   };
   let coverRef: QdnResourceRef | undefined;
@@ -390,32 +403,6 @@ export async function publishListenerSubmission(
     return {
       status: 'failed',
       reason: publishError instanceof Error ? publishError.message : 'Audio publication failed.',
-    };
-  }
-
-  let durationMs: number | null = null;
-  let durationReason = '';
-
-  try {
-    await ensureQdnResourceReady(audioRef);
-    const audioUrl = await getQdnResourceUrl(audioRef);
-    durationMs = await resolveAudioDurationFromUrl(audioUrl);
-
-    if (!Number.isFinite(durationMs) || durationMs <= 0) {
-      durationMs = null;
-      durationReason = 'Resolved audio duration is not a positive finite value.';
-    }
-  } catch (durationError) {
-    durationReason =
-      durationError instanceof Error ? durationError.message : 'Audio duration resolution failed.';
-  }
-
-  if (durationMs === null) {
-    return {
-      status: 'partial',
-      reason: durationReason || 'Audio duration could not be resolved.',
-      audio: audioRef,
-      cover: coverRef,
     };
   }
 

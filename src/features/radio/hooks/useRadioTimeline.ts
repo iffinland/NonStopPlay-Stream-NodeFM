@@ -49,7 +49,7 @@ export type UseRadioTimelineResult = {
 };
 
 const UPCOMING_COUNT = 5;
-const BACKGROUND_UPCOMING_COUNT = 255;
+const BACKGROUND_UPCOMING_COUNT = 0;
 
 export function useRadioTimeline(nowOverride?: number): UseRadioTimelineResult {
   const {

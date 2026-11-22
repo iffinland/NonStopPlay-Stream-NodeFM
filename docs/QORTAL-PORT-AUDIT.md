@@ -1,6 +1,11 @@
 # NodeFM Qortal port audit
 
-Date: 2026-11-22. Status: baseline imported; runtime conversion not started.
+Date: 2026-11-22. Baseline audit; implementation progress is tracked in
+[QORTAL-PHASE1.md](QORTAL-PHASE1.md) and [QORTAL-PHASE2.md](QORTAL-PHASE2.md).
+RC.5, including progress/preview refinements, passed owner runtime tests.
+Phases 1–2 are accepted; phase 3 has not started. See the
+[accepted RC.5 checkpoint](../reports/QORTAL-RC5-ACCEPTANCE.md). The owner has excluded Android background
+playback: foreground operation while Hub/the app is open is the accepted scope.
 
 ## Decision
 

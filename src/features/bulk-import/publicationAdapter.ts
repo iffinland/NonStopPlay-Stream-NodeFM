@@ -24,7 +24,11 @@ import type {
 
 export type BulkPublicationCapability =
   | { status: 'available'; message: string }
-  | { status: 'unavailable'; message: string; reason: 'requires-home-2-capability' };
+  | {
+      status: 'unavailable';
+      message: string;
+      reason: 'requires-home-2-capability' | 'qortal-unavailable';
+    };
 
 export type BulkPublicationRoleIntent = 'track' | 'submission';
 

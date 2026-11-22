@@ -26,9 +26,9 @@ export default function AboutPage() {
             ) : (
               <>
                 <p>
-                  NodeFM is a Qortium-native scheduled auto-DJ radio station. The station runs 24/7
-                  with a deterministic timeline derived from published playlists, schedule events,
-                  and the station clock.
+                  NodeFM is a Qortal scheduled auto-DJ radio station. The station follows a 24/7
+                  schedule with a deterministic timeline derived from published playlists, schedule
+                  events, and the station clock.
                 </p>
                 {station?.description && <p>{station.description}</p>}
                 {station?.ownerName && <p>Station owner: {station.ownerName}</p>}

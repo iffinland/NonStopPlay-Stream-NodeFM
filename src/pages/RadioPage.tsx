@@ -85,7 +85,7 @@ export default function RadioPage() {
     }
 
     if (auth.status !== 'authenticated') {
-      setLikeError('Select a Qortium account to Like tracks.');
+      setLikeError('Connect your Qortal account to Like tracks.');
       return;
     }
 

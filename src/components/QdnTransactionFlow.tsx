@@ -7,13 +7,13 @@
  * ============================================================ */
 
 import { Modal } from './Modal';
+import { Spinner } from './Spinner';
 import type { QdnTransactionState } from './qdnTransactionFlow';
 
 type QdnTransactionFlowProps = {
   title: string;
   state: QdnTransactionState;
   onClose: () => void;
-  onRetry?: () => void;
   onCancel?: () => void;
   successMessage?: string;
   standalone?: boolean;
@@ -22,7 +22,7 @@ type QdnTransactionFlowProps = {
 function statusIcon(status: QdnTransactionState['chunks'][number]['status']) {
   if (status === 'succeeded') return '✓';
   if (status === 'failed') return '!';
-  if (status === 'active') return '…';
+  if (status === 'active') return <Spinner />;
   if (status === 'skipped') return '·';
   return '○';
 }
@@ -31,13 +31,11 @@ export function QdnTransactionFlow({
   title,
   state,
   onClose,
-  onRetry,
   onCancel,
   successMessage,
   standalone = true,
 }: QdnTransactionFlowProps) {
   const running = state.phase === 'idle' || state.phase === 'running';
-  const showRetry = state.retryable && onRetry && state.phase !== 'idle';
   const showCancel = state.cancelable && onCancel && running;
   const showClose =
     state.phase === 'success' || state.phase === 'partial' || state.phase === 'failed';
@@ -70,7 +68,8 @@ export function QdnTransactionFlow({
       )}
       {state.phase === 'partial' && (
         <p className="qdn-transaction__partial">
-          The operation partially completed. Review the chunks above before retrying or closing.
+          The operation partially completed. Close this view and check the saved result before
+          taking further action.
         </p>
       )}
 
@@ -78,11 +77,6 @@ export function QdnTransactionFlow({
         {showCancel ? (
           <button className="button button--secondary" type="button" onClick={onCancel}>
             Cancel
-          </button>
-        ) : null}
-        {showRetry ? (
-          <button className="button button--primary" type="button" onClick={onRetry}>
-            Retry
           </button>
         ) : null}
         {showClose ? (

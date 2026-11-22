@@ -35,7 +35,7 @@ vi.mock('../qortium/qdn', () => ({
     kind: 'file',
     mimeType: 'audio/wav',
     size: 1024,
-    sourceToken: 'source-token-1',
+    file: new File(['audio'], 'song.mp3', { type: 'audio/mpeg' }),
   })),
 }));
 

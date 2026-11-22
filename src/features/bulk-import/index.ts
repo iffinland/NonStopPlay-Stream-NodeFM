@@ -131,16 +131,10 @@ export {
 } from './services/bulkImportStorage';
 
 export {
-  createHome2BulkPublicationAdapter,
-  Home2ReconciliationRequiredError,
-  Home2AndroidSequentialAcquisitionRequiredError,
-} from './home2BulkPublicationAdapter';
-export type {
-  Home2BulkPublicationAdapter,
-  Home2BulkPublicationPlatform,
-  Home2BridgeTransport,
-  Home2RowAcquisitionResult,
-} from './home2BulkPublicationAdapter';
+  createQortalBulkPublicationAdapter,
+  QortalReconciliationRequiredError,
+} from './qortalBulkPublicationAdapter';
+export type { QortalBulkPublicationAdapter } from './qortalBulkPublicationAdapter';
 
 export {
   applyBulkPublicationSourceAcquisitionToBatch,

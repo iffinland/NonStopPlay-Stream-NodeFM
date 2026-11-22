@@ -1,3 +1,4 @@
+import { Spinner } from '../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Station Settings Page (Admin)
  *
@@ -329,7 +330,15 @@ export default function StationSettingsPage() {
               onClick={handleSave}
               disabled={saving || !name.trim() || !playlistId || !versionId || !epochLocalInput}
             >
-              {saving ? 'Saving…' : station ? 'Save Station' : 'Create Station'}
+              {saving ? (
+                <>
+                  <Spinner /> Saving
+                </>
+              ) : station ? (
+                'Save Station'
+              ) : (
+                'Create Station'
+              )}
             </button>
           </div>
         </div>

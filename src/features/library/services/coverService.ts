@@ -78,7 +78,7 @@ function trackCoverPublishResource(input: PublishTrackCoverInput): {
   ref: QdnResourceRef;
 } {
   if (!input.publisherName.trim()) {
-    throw new Error('A registered Qortium name is required to publish a cover.');
+    throw new Error('A registered Qortal name is required to publish a cover.');
   }
 
   const sizeError = getCoverSizeError(input.file.size);

@@ -1,3 +1,4 @@
+import { Spinner } from '../../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Request Show Admin Panel
  *
@@ -321,7 +322,15 @@ export function RequestShowAdminPanel({ events }: RequestShowAdminPanelProps) {
             onClick={handleSaveDefinition}
             disabled={saving}
           >
-            {saving ? 'Saving…' : editingDefinitionId ? 'Save Definition' : 'Create Definition'}
+            {saving ? (
+              <>
+                <Spinner /> Saving
+              </>
+            ) : editingDefinitionId ? (
+              'Save Definition'
+            ) : (
+              'Create Definition'
+            )}
           </button>
         </div>
         {formError && <p className="form-error">{formError}</p>}
@@ -418,10 +427,6 @@ export function RequestShowAdminPanel({ events }: RequestShowAdminPanelProps) {
           state={transaction}
           standalone={false}
           onClose={() => setTransaction(null)}
-          onRetry={() => {
-            setTransaction(null);
-            void handleMaterializeMissing();
-          }}
         />
       ) : null}
     </section>

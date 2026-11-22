@@ -82,6 +82,22 @@ describe('library partial reconstruction', () => {
     mockedFetch.mockReset();
   });
 
+  it('excludes listener proposals sharing the station track prefix without hiding real read errors', async () => {
+    mockedSearch.mockResolvedValue([
+      { service: 'JSON', name: OWNER_NAME, identifier: 'nodefm-track-good' },
+      { service: 'JSON', name: OWNER_NAME, identifier: 'nodefm-track-submission-proposal' },
+    ]);
+    mockedFetch.mockResolvedValue(trackPayload('good'));
+    await loadLibrary(OWNER_NAME, OWNER_ADDRESS);
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+    expect(mockedFetch).toHaveBeenCalledWith(
+      expect.objectContaining({ identifier: 'nodefm-track-good' }),
+    );
+    expect(getLibraryTracks().map((track) => track.trackId)).toEqual(['good']);
+    expect(getLibraryIncomplete()).toBe(false);
+    expect(getLibraryDiagnostics()).toEqual([]);
+  });
+
   it('keeps valid tracks and marks incomplete when one fetch is unavailable', async () => {
     mockedSearch.mockResolvedValue([
       { service: 'JSON', name: OWNER_NAME, identifier: 'nodefm-track-good' },

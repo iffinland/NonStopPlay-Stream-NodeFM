@@ -1,3 +1,4 @@
+import { Spinner } from '../components/Spinner';
 /* ============================================================
  * NodeFM Station — Public Layout
  *
@@ -7,6 +8,7 @@
  * AdminGuard remains the actual authorization gate.
  * ============================================================ */
 
+import { useAuth } from './providers/authContext';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useStation } from '../features/station';
@@ -27,7 +29,14 @@ const PUBLIC_NAV = [
 
 export function Layout() {
   const location = useLocation();
-  const { isOwner, station } = useStation();
+  const { auth, refresh: connect, disconnect } = useAuth();
+  const {
+    isOwner,
+    station,
+    ownerLookupLoading,
+    ownerLookupError,
+    refresh: refreshStation,
+  } = useStation();
   const [detailTrack, setDetailTrack] = useState<Track | null>(null);
   const {
     playerState,
@@ -87,9 +96,48 @@ export function Layout() {
             </Link>
           )}
         </nav>
+        <div className="layout__account">
+          {auth.status === 'authenticated' ? (
+            <>
+              <span title={auth.address}>{auth.name ?? `${auth.address.slice(0, 8)}…`}</span>
+              <button type="button" className="layout__nav-link" onClick={disconnect}>
+                Sign out
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="layout__nav-link"
+              onClick={connect}
+              disabled={auth.status === 'loading'}
+            >
+              {auth.status === 'loading' ? (
+                <>
+                  <Spinner /> Connecting
+                </>
+              ) : (
+                'Connect Qortal account'
+              )}
+            </button>
+          )}
+        </div>
       </header>
 
       <main className="layout__main">
+        {auth.status === 'authenticated' && ownerLookupLoading && (
+          <p role="status">Checking app publisher…</p>
+        )}
+        {auth.status === 'authenticated' && ownerLookupError && (
+          <p role="alert">
+            Could not verify the app owner: {ownerLookupError}{' '}
+            <button type="button" className="button button--secondary" onClick={refreshStation}>
+              Retry owner check
+            </button>
+          </p>
+        )}
+        {auth.status === 'error' && (
+          <p role="alert">{auth.message} You can keep listening without signing in.</p>
+        )}
         <PageErrorBoundary key={location.pathname}>
           <Outlet />
         </PageErrorBoundary>
@@ -113,17 +161,21 @@ export function Layout() {
               {playerState.mode === 'PLAYLIST' ? 'PLAYLIST' : 'AutoDJ-LIVE'}
             </span>
             <span className="player-bar__track">
-              {currentTrack
-                ? `${currentTrack.title}${currentTrack.artist ? ` — ${currentTrack.artist}` : ''}`
-                : hasStationError
-                  ? 'Station data unavailable'
-                  : timeline.dataError
-                    ? 'Live radio data unavailable'
-                    : hasNoStation
-                      ? 'No station configured'
-                      : timeline.dataLoading
-                        ? 'Loading live radio…'
-                        : '—'}
+              {currentTrack ? (
+                `${currentTrack.title}${currentTrack.artist ? ` — ${currentTrack.artist}` : ''}`
+              ) : hasStationError ? (
+                'Station data unavailable'
+              ) : timeline.dataError ? (
+                'Live radio data unavailable'
+              ) : hasNoStation ? (
+                'No station configured'
+              ) : timeline.dataLoading ? (
+                <>
+                  <Spinner /> Loading live radio
+                </>
+              ) : (
+                '—'
+              )}
             </span>
             {durationMs > 0 && (
               <span className="player-bar__time">

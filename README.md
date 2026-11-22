@@ -1,90 +1,93 @@
-# NodeFM Station
+# NodeFM Station for Qortal
 
-## Qortal port workspace
+Scheduled auto-DJ radio for Qortal. Listeners join a shared broadcast position
+computed from published playlist versions, schedules, verified track lengths and
+the station clock. No continuously running streaming server is required.
 
-This is the Qortal adaptation workspace:
-<https://github.com/iffinland/NonStopPlay-Stream-NodeFM>.
-Source was imported from Qortium NodeFM commit
-`654d17f30065ed7a5c3ce0579ae386180128a5a0`; runtime conversion has not started.
-The Qortium upstream remains unchanged.
+Working repository: <https://github.com/iffinland/NonStopPlay-Stream-NodeFM>.
 
-Read the [Qortal compatibility audit and implementation phases](docs/QORTAL-PORT-AUDIT.md)
-for current status, verified Core/Hub contracts and the effort estimate.
-The remaining description/specifications describe the imported Qortium baseline
-until the corresponding port phases update them.
+## Current accepted version
 
-NodeFM is a Qortium-native scheduled 24/7 Auto-DJ radio dApp. A listener joins
-the deterministic broadcast position derived from current time, schedule,
-immutable playlist versions, verified track durations, and default rotation;
-the station does not require a continuously running streaming backend.
+**0.1.0-qortal-rc.5 — owner runtime passed, including the progress/preview addendum
+(2026-11-22).** Qortal port phases 1 and 2 are accepted for foreground operation
+while Hub/the app is open. Android background playback is outside the scope.
 
-## Current status
+Implemented and accepted:
 
-The original specification phases 0–7 were implemented and owner-validated,
-after which the project entered active beta/hardening and continued through
-listener playlists, listener submissions/moderation, resilience, transaction
-UX, and cold-start optimization work.
+- Hub automatic account authentication and registered APP publisher Admin access;
+- Qortal resource reads, foreground radio/playlist playback and navigation;
+- local audio/cover uploads and QDN audio search/add with duration recovery;
+- immediate library updates after confirmed Track publication;
+- single listener submissions, review, acceptance and rejection;
+- one-action bulk publication: select files, edit metadata, then Publish selected
+  or Submit selected; Hub approves the media and track-detail batches;
+- station configuration and playlist/version publication;
+- rotating progress indicators, no signed Retry buttons in transaction dialogs,
+  and in-app listener audio preview using the complete AUDIO identifier.
 
-Do not use the old phrase “Phase 8 not started” as current status. The roadmap
-now records Phase 8 as active and points to current source, Git state, and
-canonical reports for task-level evidence. The latest local working tree may
-contain owner changes and must be inspected before work.
+Pending Qortal port phases: durable resource removal, messages/tips and remaining
+feature integration, followed by final release validation. Unported bridge actions
+fail explicitly. RC.5 is an accepted development checkpoint, not a final release.
 
-## Product scope
-
-- deterministic live radio timeline and default rotation;
-- station schedules and immutable playlist versions;
-- global audio engine with live and playlist modes;
-- music library and QDN media flows;
-- listener likes, uploads/submissions, and owned playlists;
-- Request Show, station messages, tips/donations, and admin workflows.
-
-The future Q-Music-style creator/community platform is a separate product. Do
-not port or reuse old Q-Music/Qortal architecture as NodeFM's foundation.
-
-## Durable specifications
-
-1. [`docs/PROJECT-VISION.md`](docs/PROJECT-VISION.md)
-2. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-3. [`docs/QORTIUM-DATA-MODEL.md`](docs/QORTIUM-DATA-MODEL.md)
-4. [`docs/RADIO-TIMELINE-SPEC.md`](docs/RADIO-TIMELINE-SPEC.md)
-5. [`docs/PLAYER-SPEC.md`](docs/PLAYER-SPEC.md)
-6. [`docs/ADMIN-SPEC.md`](docs/ADMIN-SPEC.md)
-7. [`docs/ROADMAP.md`](docs/ROADMAP.md)
-8. [`docs/RELEASE.md`](docs/RELEASE.md)
-
-Current source is authoritative for implemented behavior. The roadmap is a
-product-plan/history document, not a substitute for a fresh source and Git
-baseline.
-
-## Development
+## Build and publish
 
 ```bash
 npm ci
-npm run dev
-npm run test
+npm test
 npm run build
 npm run lint
 npm run format:check
 ```
 
-Local preview, mocks, tests, and build output do not prove embedded Home,
-deployed QDN, playback, persistence, or transaction behavior.
+Package the **contents** of `dist/`, with `index.html` at the ZIP root, and retain
+`LICENSE`. Publish the runtime ZIP as the existing Qortal APP using its default
+identifier. Do not publish the source ZIP. The registered owner of the deployed
+APP name receives Admin access; other accounts remain station guests.
 
-## Agent routing and reports
+Publishing/signing/fees use Qortal Hub approvals. Do not repeat an unknown signed
+request: for bulk work, use Check pending publications, then continue confirmed
+progress. Read-only refresh/reload controls send no new publication transaction.
+Preview Audio opens inside the app, pauses the global player only when preview
+playback starts and unloads when closed. Resume radio explicitly afterwards.
 
-- [`AGENTS.md`](AGENTS.md) — project entry point for AI-assisted work.
-- Canonical project context:
-  `/home/iffi/VsCodec-Projects/Qortium/qortium-dev-workspace/projects/nodefm-station.md`
-- AI work reports belong under
-  `/home/iffi/VsCodec-Projects/Qortium/docs/nodefm-station/`.
+See [Qortal phase 2 and operator checks](docs/QORTAL-PHASE2.md),
+[phase 1 identity/playback](docs/QORTAL-PHASE1.md),
+[release runbook](docs/RELEASE.md) and
+[accepted RC.5 checkpoint](reports/QORTAL-RC5-ACCEPTANCE.md).
 
-The application `docs/` directory is reserved for durable specifications and
-operator/release documentation.
+## Source provenance and scope
 
-## Release boundary
+Imported from the read-only Qortium repository
+<https://github.com/iffinland/nodefm-station> at
+`654d17f30065ed7a5c3ce0579ae386180128a5a0`.
+Import: `353092e5e999fa8194a6fa7b2f3ca37e3c1a2020`;
+audit baseline: `51b145eee892bd99bd43a6640f6cbe2e2f4e36b4`.
+The original Qortium repository is unchanged. Port commits preserve target history.
 
-Build, commit, push, tag, release, deployment, signing, payments, moderation,
-and QDN publication require explicit owner authorization. Follow
-[`docs/RELEASE.md`](docs/RELEASE.md) and record exact source/artifact/deployment
-provenance.
+The deterministic timeline, scheduling and domain model come from the imported
+product. Qortal-specific boundaries and accepted scope are described in the
+[compatibility audit](docs/QORTAL-PORT-AUDIT.md). Older Qortium specifications and
+iteration reports are historical unless superseded by the Qortal documents.
+
+Durable specifications:
+
+- [Project vision](docs/PROJECT-VISION.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Imported data model](docs/QORTIUM-DATA-MODEL.md)
+- [Radio timeline](docs/RADIO-TIMELINE-SPEC.md)
+- [Player](docs/PLAYER-SPEC.md)
+- [Admin](docs/ADMIN-SPEC.md)
+- [Roadmap](docs/ROADMAP.md)
+
+## Verification and workflow
+
+Accepted RC.5: **113 test files / 925 tests**, production build, ESLint, formatting
+and Git whitespace checks passed. Automated host fixtures supplement the owner's
+native Hub runtime result; they do not independently prove native compatibility.
+No live QDN transactions are performed by the test suite.
+
+Follow [AGENTS.md](AGENTS.md). New development iterations are delivered as runtime
+and source ZIPs; commit/push follows owner authorization after runtime acceptance.
+Tag, official release and deployment require separate authorization.
+
+License: GPL-3.0-only; see [LICENSE](LICENSE).

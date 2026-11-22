@@ -11,6 +11,7 @@ import { sendBridgeRequest } from './bridge';
 
 const ACCOUNT_NAMES_TTL_MS = 5 * 60_000;
 const NAME_ADDRESS_TTL_MS = 5 * 60_000;
+let identityEpoch = 0;
 
 type CacheEntry<T> = {
   value: T;
@@ -72,20 +73,23 @@ export async function getAccountNames(address: string): Promise<string[]> {
     return inflight;
   }
 
+  const epoch = identityEpoch;
   const requestPromise = sendBridgeRequest<unknown>({
     action: 'GET_ACCOUNT_NAMES',
     address: normalizedAddress,
   })
     .then((raw) => {
       const names = normalizeAccountNames(raw);
-      accountNamesCache.set(normalizedAddress, {
-        value: names,
-        cachedAt: Date.now(),
-      });
+      if (epoch === identityEpoch)
+        accountNamesCache.set(normalizedAddress, {
+          value: names,
+          cachedAt: Date.now(),
+        });
       return names;
     })
     .finally(() => {
-      accountNamesInflight.delete(normalizedAddress);
+      if (accountNamesInflight.get(normalizedAddress) === requestPromise)
+        accountNamesInflight.delete(normalizedAddress);
     });
 
   accountNamesInflight.set(normalizedAddress, requestPromise);
@@ -109,13 +113,15 @@ export async function resolveNameWalletAddress(name: string): Promise<string | n
     return inflight;
   }
 
+  const epoch = identityEpoch;
   const requestPromise = sendBridgeRequest<unknown>({
     action: 'GET_NAME_DATA',
     name: normalizedName,
   })
     .then((response) => {
       if (!response || typeof response !== 'object') {
-        nameAddressCache.set(cacheKey, { value: null, cachedAt: Date.now() });
+        if (epoch === identityEpoch)
+          nameAddressCache.set(cacheKey, { value: null, cachedAt: Date.now() });
         return null;
       }
 
@@ -125,15 +131,17 @@ export async function resolveNameWalletAddress(name: string): Promise<string | n
         normalizeAddress(record.ownerAddress) ??
         normalizeAddress(record.address);
 
-      nameAddressCache.set(cacheKey, {
-        value: resolvedAddress,
-        cachedAt: Date.now(),
-      });
+      if (epoch === identityEpoch)
+        nameAddressCache.set(cacheKey, {
+          value: resolvedAddress,
+          cachedAt: Date.now(),
+        });
 
       return resolvedAddress;
     })
     .finally(() => {
-      nameAddressInflight.delete(cacheKey);
+      if (nameAddressInflight.get(cacheKey) === requestPromise)
+        nameAddressInflight.delete(cacheKey);
     });
 
   nameAddressInflight.set(cacheKey, requestPromise);
@@ -141,6 +149,7 @@ export async function resolveNameWalletAddress(name: string): Promise<string | n
 }
 
 export function clearIdentityCaches(): void {
+  identityEpoch += 1;
   accountNamesCache.clear();
   accountNamesInflight.clear();
   nameAddressCache.clear();

@@ -49,9 +49,9 @@ function PageLoader() {
 
 function AdminGuard({ children }: { children: React.ReactNode }) {
   const { auth } = useAuth();
-  const { isOwner } = useStation();
+  const { isOwner, ownerLookupLoading } = useStation();
 
-  if (auth.status === 'loading') {
+  if (auth.status === 'loading' || ownerLookupLoading) {
     return <LoadingState message="Checking authorization…" />;
   }
 

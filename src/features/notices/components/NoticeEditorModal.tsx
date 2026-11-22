@@ -1,3 +1,4 @@
+import { Spinner } from '../../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Notice Editor Modal
  *
@@ -118,7 +119,6 @@ export function NoticeEditorModal({ notice, onClose, onSave }: Props) {
             setTransaction(null);
             if (transaction.phase === 'success') onClose();
           }}
-          onRetry={() => void handleSave()}
         />
       ) : (
         <>
@@ -166,7 +166,15 @@ export function NoticeEditorModal({ notice, onClose, onSave }: Props) {
               onClick={handleSave}
               disabled={saving || !message.trim()}
             >
-              {saving ? 'Publishing…' : notice ? 'Save Notice' : 'Publish Notice'}
+              {saving ? (
+                <>
+                  <Spinner /> Publishing
+                </>
+              ) : notice ? (
+                'Save Notice'
+              ) : (
+                'Publish Notice'
+              )}
             </button>
           </div>
         </>

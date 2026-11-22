@@ -53,7 +53,7 @@ describe('track cover resolution', () => {
         return { status: 'READY' };
       }
 
-      if (request.action === 'GET_QDN_RESOURCE_STREAM_URL') {
+      if (request.action === 'GET_QDN_RESOURCE_URL') {
         return 'https://home.invalid/qdn-media/cover-token';
       }
 
@@ -71,7 +71,7 @@ describe('track cover resolution', () => {
         return { status: 'READY' };
       }
 
-      if (request.action === 'GET_QDN_RESOURCE_STREAM_URL') {
+      if (request.action === 'GET_QDN_RESOURCE_URL') {
         return request.service === 'AUDIO'
           ? 'https://home.invalid/qdn-media/audio-token'
           : 'https://home.invalid/qdn-media/cover-token';
@@ -88,13 +88,13 @@ describe('track cover resolution', () => {
     );
 
     expect(mockedSend).toHaveBeenCalledWith({
-      action: 'GET_QDN_RESOURCE_STREAM_URL',
+      action: 'GET_QDN_RESOURCE_URL',
       service: 'AUDIO',
       name: 'Owner',
       identifier: 'audio-1',
     });
     expect(mockedSend).toHaveBeenCalledWith({
-      action: 'GET_QDN_RESOURCE_STREAM_URL',
+      action: 'GET_QDN_RESOURCE_URL',
       service: 'IMAGE',
       name: 'Owner',
       identifier: 'cover-1',
@@ -107,7 +107,7 @@ describe('track cover resolution', () => {
         return { status: 'NOT_PUBLISHED' };
       }
 
-      if (request.action === 'GET_QDN_RESOURCE_STREAM_URL') {
+      if (request.action === 'GET_QDN_RESOURCE_URL') {
         return 'https://home.invalid/qdn-media/cover-token';
       }
 

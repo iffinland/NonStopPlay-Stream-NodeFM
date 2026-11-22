@@ -9,11 +9,13 @@
 import type { Station } from '../../../types/domain';
 import {
   fetchQdnResourceData,
+  getQdnResourceStatus,
   publishResource,
   qdnJsonPublishFileName,
-  searchQdnResources,
 } from '../../../qortium/qdn';
-import { NODEFM_APP_NAME } from '../../../qortium/navigation';
+import { getCanonicalNodeFmAppIdentity } from '../../../qortium/navigation';
+import { resolveNameWalletAddress } from '../../../qortium/identity';
+import { isConfirmedQdnNotFoundError } from '../../../qortium/qdnReadError';
 import {
   STATION_QDN_IDENTIFIER,
   STATION_QDN_SERVICE,
@@ -88,118 +90,63 @@ export function getStationLoadAction(preferredName: string | null): StationLoadA
 
 // ── QDN load/publish ───────────────────────────────────────────────
 
-async function loadFromReference(name: string): Promise<Station | null> {
-  const payload = await fetchQdnResourceData({
-    service: STATION_QDN_SERVICE,
-    name,
-    identifier: STATION_QDN_IDENTIFIER,
-  });
-
-  const parsed = deserializeStationFromQdn(payload);
-
-  if (!parsed) {
-    throw new Error('Invalid NodeFM station configuration payload.');
-  }
-
-  return parsed;
-}
-
 export async function loadStationConfig(preferredName: string | null = null): Promise<void> {
-  if (stationLoaded || stationLoading) {
-    return;
-  }
-
-  const targetKey = stationLoadKeyFor(preferredName);
-  const epoch = stationEpoch;
-
+  const publisher = preferredName?.trim() || getCanonicalNodeFmAppIdentity().name;
+  const targetKey = stationLoadKeyFor(publisher);
+  if (stationLoadKey === targetKey && (stationLoaded || stationLoading)) return;
+  // Invalidate work started under a different app publisher.
+  const epoch = ++stationEpoch;
   stationLoadKey = targetKey;
+  station = null;
+  stationPublisherName = null;
+  stationLoaded = false;
   stationLoading = true;
   stationError = null;
   notify();
-
   try {
-    let resolvedStation: Station | null = null;
-    let resolvedPublisherName: string | null = null;
-
-    // Fast path: if the selected account has a registered Qortium name,
-    // try the canonical station identifier under that name first.
-    if (preferredName) {
-      try {
-        const payload = await fetchQdnResourceData({
-          service: STATION_QDN_SERVICE,
-          name: preferredName,
-          identifier: STATION_QDN_IDENTIFIER,
-        });
-        const parsed = deserializeStationFromQdn(payload);
-
-        if (!parsed) {
-          throw new Error('Invalid NodeFM station configuration payload.');
-        }
-
-        resolvedStation = parsed;
-        resolvedPublisherName = preferredName;
-      } catch (error) {
-        if (error instanceof Error && /Invalid NodeFM station configuration/i.test(error.message)) {
-          throw error;
-        }
-
-        // Fall through to global discovery; this is a normal bootstrap
-        // case for a listener whose selected account differs from the
-        // station publisher.
-      }
-    }
-
-    if (!resolvedStation) {
-      const results = await searchQdnResources({
+    let parsed: Station | null = null;
+    try {
+      const ref = {
         service: STATION_QDN_SERVICE,
-        query: STATION_QDN_IDENTIFIER,
-        prefix: true,
-        mode: 'ALL',
-        limit: 20,
-        includeMetadata: true,
-      });
-
-      const uniqueMatches = new Map<string, (typeof results)[number]>();
-
-      for (const result of results) {
-        if (
-          result.identifier !== STATION_QDN_IDENTIFIER ||
-          !result.name ||
-          result.name !== NODEFM_APP_NAME
-        ) {
-          continue;
+        name: publisher,
+        identifier: STATION_QDN_IDENTIFIER,
+      };
+      // A Qortal node can report NOT_PUBLISHED before a missing download fails
+      // with a generic "data unavailable". Only this explicit status is absence.
+      const status = await getQdnResourceStatus(ref).catch(() => null);
+      if (status?.status === 'NOT_PUBLISHED') {
+        if (epoch === stationEpoch) {
+          stationPublisherName = publisher;
+          stationLoaded = true;
         }
-
-        uniqueMatches.set(`${result.name}\u0000${result.identifier}`, result);
+        return;
       }
-
-      const matches = [...uniqueMatches.values()];
-
-      if (matches.length > 1) {
-        throw new Error(
-          `Ambiguous station configuration: ${matches.length} NodeFM station resources were found.`,
-        );
+      const payload = await fetchQdnResourceData({
+        service: STATION_QDN_SERVICE,
+        name: publisher,
+        identifier: STATION_QDN_IDENTIFIER,
+      });
+      parsed = deserializeStationFromQdn(payload);
+      if (!parsed) throw new Error('Invalid NodeFM station configuration payload.');
+      if (parsed.publisherName !== publisher) {
+        throw new Error('Station configuration publisher does not match this Qortal app.');
       }
-
-      if (matches.length === 1) {
-        const match = matches[0];
-        resolvedStation = await loadFromReference(match.name);
-        resolvedPublisherName = match.name;
+      const owner = await resolveNameWalletAddress(publisher);
+      if (!owner || owner !== parsed.ownerAddress) {
+        throw new Error('Station owner does not match the registered Qortal publisher.');
       }
+    } catch (error) {
+      if (!isConfirmedQdnNotFoundError(error)) throw error;
+      // Only absence of the config is a normal bootstrap. Name-ownership errors
+      // after a config was found must never become a fresh, claimable station.
+      if (parsed) throw error;
     }
-
-    if (epoch !== stationEpoch || stationLoadKey !== targetKey) {
-      return;
-    }
-
-    station = resolvedStation;
-    stationPublisherName = resolvedStation?.publisherName?.trim() || resolvedPublisherName || null;
+    if (epoch !== stationEpoch) return;
+    station = parsed;
+    stationPublisherName = publisher;
     stationLoaded = true;
   } catch (error) {
-    if (epoch !== stationEpoch || stationLoadKey !== targetKey) {
-      return;
-    }
-
+    if (epoch !== stationEpoch) return;
     stationError = error instanceof Error ? error.message : 'Failed to load station configuration.';
   } finally {
     if (epoch === stationEpoch) {

@@ -1,21 +1,15 @@
-/* ============================================================
- * NodeFM Station — Qortium Navigation Helpers
- *
- * Canonical QDN address construction and Home navigation for
- * the current app resource and explicit QDN resources.
- *
- * Reference:
- * - qortium-home/src/qdn.ts (buildQdnDisplayUrl)
- * - qortium-home/electron/qdn.ts (OPEN_NEW_TAB/OPEN_CURRENT_TAB)
- * - qortium-boards/src/deepLink.ts (app base address)
- * ============================================================ */
-
+/** Qortal APP identity and deep links, using Core-injected deployment context. */
 import { sendBridgeRequest } from './bridge';
 import type { QdnResourceRef } from '../types/domain';
 
 export const NODEFM_APP_SERVICE = 'APP';
-export const NODEFM_APP_NAME = 'NodeFM';
-export const NODEFM_APP_IDENTIFIER = 'Radio-AutoDJ';
+// Production publisher comes from Core's APP render context.
+export const NODEFM_APP_NAME =
+  (typeof window !== 'undefined' &&
+    typeof window._qdnName === 'string' &&
+    window._qdnName.trim()) ||
+  'NodeFM';
+export const NODEFM_APP_IDENTIFIER = 'default';
 
 export type QdnHostGlobals = {
   _qdnService?: unknown;
@@ -48,33 +42,31 @@ export function getCurrentQdnAppIdentity(
 export function getCanonicalNodeFmAppIdentity(): QdnResourceRef {
   return {
     service: NODEFM_APP_SERVICE,
-    name: NODEFM_APP_NAME,
-    identifier: NODEFM_APP_IDENTIFIER,
+    name: getCurrentQdnAppIdentity().name,
+    identifier: getCurrentQdnAppIdentity().identifier,
   };
 }
 
 export function buildQdnUrl(resource: QdnResourceRef): string {
-  if (!resource.service.trim() || !resource.name.trim() || !resource.identifier?.trim()) {
-    throw new Error('QDN service, name, and identifier are required to build a QDN address.');
+  if (!resource.service.trim() || !resource.name.trim()) {
+    throw new Error('QDN service and name are required to build a Qortal address.');
   }
-
-  return `qdn://${resource.service.trim().toUpperCase()}/${encodeURIComponent(resource.name.trim())}/${encodeURIComponent(resource.identifier.trim())}`;
+  const identifier = resource.identifier?.trim();
+  const suffix = identifier && identifier !== 'default' ? `/${encodeURIComponent(identifier)}` : '';
+  return `qortal://${resource.service.trim().toUpperCase()}/${encodeURIComponent(resource.name.trim())}${suffix}`;
 }
 
 export type OpenTabTarget = 'current' | 'new';
 
-/**
- * Ask Home to navigate to a QDN address.
- *
- * Home rejects anything that is not a `qdn://`, `home://`, or
- * `core://` address, matching the current bridge contract.
- */
+/** Open a Qortal resource through Hub. */
 export async function openQdnAddress(
   address: string,
   target: OpenTabTarget = 'new',
 ): Promise<void> {
-  if (!/^(qdn|home|core):\/\//i.test(address)) {
-    throw new Error('Only qdn://, home://, and core:// addresses can be opened by Qortium Home.');
+  if (target === 'current')
+    throw new Error('Current-tab navigation is not supported by this Qortal adapter.');
+  if (!/^qortal:\/\//i.test(address)) {
+    throw new Error('Only qortal:// addresses can be opened by Qortal Hub.');
   }
 
   if (address.length > 2048) {
@@ -82,7 +74,7 @@ export async function openQdnAddress(
   }
 
   await sendBridgeRequest({
-    action: target === 'current' ? 'OPEN_CURRENT_TAB' : 'OPEN_NEW_TAB',
-    address,
+    action: 'OPEN_NEW_TAB',
+    qortalLink: address,
   });
 }
