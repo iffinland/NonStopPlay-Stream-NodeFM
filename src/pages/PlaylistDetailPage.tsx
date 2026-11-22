@@ -1,0 +1,346 @@
+/* ============================================================
+ * NodeFM Station — Public Playlist Detail Page
+ *
+ * Resolves a public playlist's canonical immutable
+ * PlaylistVersion, reconstructs its tracks, and exposes the
+ * global AudioEngine's PLAYLIST controls.
+ * ============================================================ */
+
+import { useCallback, useEffect, useState } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { PageShell } from '../components/PageShell';
+import { LoadingState } from '../components/LoadingState';
+import { ErrorState } from '../components/ErrorState';
+import { useStation } from '../features/station';
+import { useLiveRadioPlayerContext } from '../features/radio/player';
+import { formatDurationMs } from '../utils/duration';
+import { TrackDetailModal } from '../features/tracks';
+import type { Track } from '../types/domain';
+import {
+  loadPublicPlaylistDetail,
+  resolvePublicPlaylistAudioTracks,
+  type PublicPlaylistDetail,
+  type PublicPlaylistDetailResult,
+} from '../features/playlists/services/publicPlaylistService';
+import { PaginationControls, paginateItems, usePagination } from '../features/pagination';
+
+export default function PlaylistDetailPage() {
+  const { playlistId } = useParams<{ playlistId: string }>();
+  const [searchParams] = useSearchParams();
+  const { publisherName, loading: stationLoading } = useStation();
+  const {
+    playerState,
+    togglePlayPause,
+    playPlaylist,
+    playNext,
+    playPrevious,
+    togglePlaylistShuffle,
+    togglePlaylistLoop,
+    seek,
+    returnToLive,
+  } = useLiveRadioPlayerContext();
+
+  const [result, setResult] = useState<PublicPlaylistDetailResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [resolvingAudio, setResolvingAudio] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [detailTrack, setDetailTrack] = useState<Track | null>(null);
+  const pagination = usePagination(result?.status === 'ready' ? result.detail.tracks.length : 0);
+
+  const load = useCallback(
+    async (publisher: string, id: string, kind: 'station' | 'listener') => {
+      setLoading(true);
+      setError(null);
+      setResult(null);
+      setStartError(null);
+
+      try {
+        setResult(await loadPublicPlaylistDetail(publisher, id, kind, publisherName ?? undefined));
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load playlist.');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [publisherName],
+  );
+
+  useEffect(() => {
+    if (stationLoading) {
+      return;
+    }
+
+    const effectivePublisherName = searchParams.get('publisher')?.trim() || publisherName;
+    const kind = searchParams.get('kind') === 'listener' ? 'listener' : 'station';
+
+    if (!effectivePublisherName || !playlistId) {
+      setLoading(false);
+      setError('No station publisher is available.');
+      return;
+    }
+
+    load(effectivePublisherName, playlistId, kind);
+  }, [load, playlistId, publisherName, searchParams, stationLoading]);
+
+  const detail: PublicPlaylistDetail | null = result?.status === 'ready' ? result.detail : null;
+  const pageTracks = detail
+    ? paginateItems(detail.tracks, pagination.pageIndex, pagination.pageSize)
+    : [];
+  const trackOffset = pagination.pageIndex * pagination.pageSize;
+
+  const startPlayback = useCallback(
+    async (startIndex = 0) => {
+      if (!detail) {
+        return;
+      }
+
+      setResolvingAudio(true);
+      setStartError(null);
+
+      const resolution = await resolvePublicPlaylistAudioTracks(detail.tracks);
+
+      setResolvingAudio(false);
+
+      if (resolution.status === 'audio-unavailable') {
+        setStartError(resolution.message);
+        return;
+      }
+
+      playPlaylist(resolution.tracks, {
+        startIndex,
+        autoplay: true,
+        shuffle: false,
+        loop: false,
+      });
+    },
+    [detail, playPlaylist],
+  );
+
+  const queue = playerState.playlistQueue;
+  const currentTrack = playerState.currentTrack;
+  const isPlaying = playerState.playbackState === 'playing';
+  const durationSec = currentTrack ? Math.max(0, currentTrack.durationMs / 1000) : 0;
+  const offsetSec = Math.max(
+    0,
+    Math.min(playerState.currentOffsetSec, durationSec || playerState.currentOffsetSec),
+  );
+
+  if (loading || (stationLoading && !result && !error)) {
+    return (
+      <PageShell title="Playlist">
+        <LoadingState message="Loading playlist…" />
+      </PageShell>
+    );
+  }
+
+  if (error) {
+    return (
+      <PageShell title="Playlist">
+        <ErrorState
+          message="Failed to load playlist."
+          detail={error}
+          onRetry={() => {
+            const effectivePublisherName = searchParams.get('publisher')?.trim() || publisherName;
+            const kind = searchParams.get('kind') === 'listener' ? 'listener' : 'station';
+            if (effectivePublisherName && playlistId) {
+              load(effectivePublisherName, playlistId, kind);
+            }
+          }}
+        />
+      </PageShell>
+    );
+  }
+
+  if (!result) {
+    return (
+      <PageShell title="Playlist">
+        <ErrorState message="Playlist is unavailable." />
+      </PageShell>
+    );
+  }
+
+  if (result.status !== 'ready') {
+    return (
+      <PageShell title="Playlist">
+        <ErrorState
+          message="Playlist is unavailable."
+          detail={result.message}
+          onRetry={() => {
+            const effectivePublisherName = searchParams.get('publisher')?.trim() || publisherName;
+            const kind = searchParams.get('kind') === 'listener' ? 'listener' : 'station';
+            if (effectivePublisherName && playlistId) {
+              load(effectivePublisherName, playlistId, kind);
+            }
+          }}
+        />
+      </PageShell>
+    );
+  }
+
+  const { playlist, version, tracks } = result.detail;
+  const coverUrl =
+    playerState.mode === 'PLAYLIST' && currentTrack?.coverUrl
+      ? currentTrack.coverUrl
+      : (tracks.find((item) => item.coverUrl)?.coverUrl ?? undefined);
+
+  return (
+    <PageShell title={playlist.title}>
+      <div className="playlist-detail">
+        <div className="playlist-detail__header">
+          {coverUrl ? (
+            <img className="playlist-detail__cover" src={coverUrl} alt="" />
+          ) : (
+            <div className="playlist-detail__cover-placeholder" aria-hidden="true">
+              <span className="signal-cover__core signal-cover__core--lg" />
+            </div>
+          )}
+          <div className="playlist-detail__info">
+            <h2 className="playlist-detail__title">{playlist.title}</h2>
+            {playlist.description && (
+              <p className="playlist-detail__description">{playlist.description}</p>
+            )}
+            <p className="playlist-detail__meta">
+              {version.tracks.length} tracks · {formatDurationMs(version.totalDurationMs)}
+            </p>
+            <p className="playlist-detail__publisher">Published by {publisherName}</p>
+          </div>
+        </div>
+
+        {playerState.mode === 'PLAYLIST' ? (
+          <section className="playlist-controls">
+            <button className="button button--secondary" type="button" onClick={returnToLive}>
+              Return to Live
+            </button>
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={togglePlayPause}
+              disabled={!currentTrack}
+            >
+              {isPlaying ? 'Pause' : 'Play'}
+            </button>
+            <button
+              className="button button--secondary"
+              type="button"
+              onClick={playPrevious}
+              disabled={!queue}
+            >
+              Previous
+            </button>
+            <button
+              className="button button--secondary"
+              type="button"
+              onClick={playNext}
+              disabled={!queue}
+            >
+              Next
+            </button>
+            <button
+              className={`button ${queue?.shuffleEnabled ? 'button--primary' : 'button--secondary'}`}
+              type="button"
+              onClick={togglePlaylistShuffle}
+              disabled={!queue}
+            >
+              Shuffle {queue?.shuffleEnabled ? 'On' : 'Off'}
+            </button>
+            <button
+              className={`button ${queue?.loopEnabled ? 'button--primary' : 'button--secondary'}`}
+              type="button"
+              onClick={togglePlaylistLoop}
+              disabled={!queue}
+            >
+              Loop {queue?.loopEnabled ? 'On' : 'Off'}
+            </button>
+            {currentTrack && (
+              <div className="playlist-controls__seek">
+                <span>{formatDurationMs(Math.round(offsetSec * 1000))}</span>
+                <input
+                  type="range"
+                  min="0"
+                  max={Math.max(durationSec, 1)}
+                  step="0.1"
+                  value={offsetSec}
+                  aria-label="Seek"
+                  onChange={(event) => seek(Number(event.target.value))}
+                />
+                <span>{formatDurationMs(currentTrack.durationMs)}</span>
+              </div>
+            )}
+            {startError && <p className="playlist-detail__error">{startError}</p>}
+            {playerState.error && <p className="playlist-detail__error">{playerState.error}</p>}
+          </section>
+        ) : (
+          <section className="playlist-controls">
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={() => startPlayback(0)}
+              disabled={resolvingAudio}
+            >
+              {resolvingAudio ? 'Preparing audio…' : 'Listen to Playlist'}
+            </button>
+            {startError && <p className="playlist-detail__error">{startError}</p>}
+          </section>
+        )}
+
+        <section className="playlist-detail__tracks">
+          <h3>Tracks</h3>
+          <ol className="playlist-detail__track-list">
+            {pageTracks.map((entry, index) => {
+              const trackIndex = trackOffset + index;
+
+              return (
+                <li
+                  key={`${entry.track.trackId}-${trackIndex}`}
+                  className={`playlist-detail__track${
+                    entry.track.trackId === currentTrack?.trackId
+                      ? ' playlist-detail__track--playing'
+                      : ''
+                  }`}
+                >
+                  <span className="playlist-detail__track-index">{trackIndex + 1}</span>
+                  <span className="playlist-detail__track-title">
+                    {entry.track.title}
+                    {entry.track.artist ? ` — ${entry.track.artist}` : ''}
+                  </span>
+                  <span className="playlist-detail__track-duration">
+                    {formatDurationMs(entry.track.durationMs)}
+                  </span>
+                  <button
+                    className="button button--secondary playlist-detail__track-info"
+                    type="button"
+                    aria-label={`${entry.track.title} track details`}
+                    onClick={() => setDetailTrack(entry.track)}
+                  >
+                    ℹ
+                  </button>
+                  <button
+                    className="button button--secondary"
+                    type="button"
+                    onClick={() => startPlayback(trackIndex)}
+                    disabled={resolvingAudio}
+                  >
+                    Play
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+          {tracks.length > 0 ? (
+            <PaginationControls
+              totalItems={tracks.length}
+              pageIndex={pagination.pageIndex}
+              pageSize={pagination.pageSize}
+              onPageChange={pagination.setPageIndex}
+              onPageSizeChange={pagination.setPageSize}
+            />
+          ) : null}
+        </section>
+        {detailTrack && (
+          <TrackDetailModal track={detailTrack} onClose={() => setDetailTrack(null)} />
+        )}
+      </div>
+    </PageShell>
+  );
+}

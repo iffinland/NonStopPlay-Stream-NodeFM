@@ -1,0 +1,306 @@
+/* ============================================================
+ * NodeFM Station — Track Edit Modal
+ *
+ * Edit station track metadata.
+ * ============================================================ */
+
+import { useState } from 'react';
+import { Modal } from '../../../components/Modal';
+import { QdnTransactionFlow } from '../../../components/QdnTransactionFlow';
+import {
+  createQdnTransactionState,
+  markQdnTransactionChunkActive,
+  type QdnTransactionState,
+} from '../../../components/qdnTransactionFlow';
+import type { Track } from '../../../types/domain';
+import { useLibrary } from '../../../hooks/useLibrary';
+import { useStationIdentity } from '../../station';
+import { TaxonomyInput, useTaxonomy, getCanonicalTaxonomyValues } from '../../taxonomy';
+import {
+  AlbumInput,
+  ArtistInput,
+  ReleaseDateInput,
+  TitleInput,
+  isValidReleaseDateValue,
+} from '../../metadata-intelligence';
+import { TrackCover } from './TrackCover';
+import { publishAndUpdateTrackCover, readCoverFile } from '../services/coverService';
+
+type Props = {
+  track: Track;
+  onClose: () => void;
+};
+
+export function TrackEditModal({ track, onClose }: Props) {
+  const { editTrack } = useLibrary();
+  const { publisherName } = useStationIdentity();
+  const { remember, genres: genreSuggestions, tags: tagSuggestions } = useTaxonomy();
+  const [title, setTitle] = useState(track.title);
+  const [artist, setArtist] = useState(track.artist ?? '');
+  const [album, setAlbum] = useState(track.album ?? '');
+  const [releaseDate, setReleaseDate] = useState(track.releaseDate ?? '');
+  const [description, setDescription] = useState(track.description ?? '');
+  const [genres, setGenres] = useState(track.genres?.join(', ') ?? '');
+  const [tags, setTags] = useState(track.tags?.join(', ') ?? '');
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverBase64, setCoverBase64] = useState<string | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [removeCover, setRemoveCover] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [coverPublishing, setCoverPublishing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [transaction, setTransaction] = useState<QdnTransactionState | null>(null);
+
+  const handleCoverSelected = async (file: File) => {
+    try {
+      const cover = await readCoverFile(file);
+      setCoverFile(file);
+      setCoverBase64(cover.bytesBase64);
+      setCoverPreview(cover.dataUrl);
+      setRemoveCover(false);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to read cover image.');
+    }
+  };
+
+  const handleRemoveCover = () => {
+    setCoverFile(null);
+    setCoverBase64(null);
+    setCoverPreview(null);
+    setRemoveCover(true);
+    setError(null);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    const chunks = coverFile
+      ? [
+          { id: 'cover', label: 'Publish track cover' },
+          { id: 'track', label: 'Update track metadata' },
+        ]
+      : [{ id: 'track', label: 'Update track metadata' }];
+    setTransaction(createQdnTransactionState(chunks, { retryable: true }));
+    setTransaction((current) =>
+      current ? markQdnTransactionChunkActive(current, chunks[0].id) : current,
+    );
+
+    try {
+      if (releaseDate.trim() && !isValidReleaseDateValue(releaseDate)) {
+        throw new Error('Release date must use YYYY, YYYY-MM, or YYYY-MM-DD.');
+      }
+
+      const shouldRemoveCover = removeCover && !coverFile;
+
+      if (coverFile) {
+        if (!publisherName) {
+          throw new Error('A registered Qortium name is required to publish a cover.');
+        }
+
+        if (!coverBase64) {
+          throw new Error('Cover image data is not available.');
+        }
+
+        setCoverPublishing(true);
+        try {
+          await publishAndUpdateTrackCover({
+            trackId: track.trackId,
+            title: title || track.title,
+            publisherName,
+            file: coverFile,
+            bytesBase64: coverBase64,
+            metadata: {
+              title: title || track.title,
+              artist: artist || undefined,
+              album: album || undefined,
+              releaseDate: releaseDate || undefined,
+              description: description || undefined,
+              genres: genres.trim()
+                ? getCanonicalTaxonomyValues(genres, genreSuggestions)
+                : undefined,
+              tags: tags.trim() ? getCanonicalTaxonomyValues(tags, tagSuggestions) : undefined,
+            },
+          });
+          setTransaction((current) =>
+            current ? markQdnTransactionChunkActive(current, 'track') : current,
+          );
+        } catch (err) {
+          throw new Error(
+            `Cover publication failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          );
+        } finally {
+          setCoverPublishing(false);
+        }
+      }
+
+      if (!coverFile) {
+        await editTrack(track.trackId, {
+          title: title || track.title,
+          artist: artist || undefined,
+          album: album || undefined,
+          releaseDate: releaseDate || undefined,
+          description: description || undefined,
+          genres: genres.trim() ? getCanonicalTaxonomyValues(genres, genreSuggestions) : undefined,
+          tags: tags.trim() ? getCanonicalTaxonomyValues(tags, tagSuggestions) : undefined,
+          ...(shouldRemoveCover ? { removeCover: true } : {}),
+        });
+      }
+      remember('genres', getCanonicalTaxonomyValues(genres, genreSuggestions));
+      remember('tags', getCanonicalTaxonomyValues(tags, tagSuggestions));
+      setTransaction((current) =>
+        current
+          ? {
+              ...current,
+              chunks: current.chunks.map((item) => ({ ...item, status: 'succeeded' as const })),
+              phase: 'success' as const,
+              successMessage: 'Track saved.',
+              retryable: false,
+            }
+          : current,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save track.');
+      setTransaction((current) =>
+        current
+          ? {
+              ...current,
+              chunks: current.chunks.map((item) =>
+                item.status === 'active' ? { ...item, status: 'failed' as const } : item,
+              ),
+              phase: 'failed' as const,
+              error: err instanceof Error ? err.message : 'Failed to save track.',
+              retryable: true,
+            }
+          : current,
+      );
+    } finally {
+      setSaving(false);
+      setCoverPublishing(false);
+    }
+  };
+
+  return (
+    <Modal title="Edit Track" onClose={onClose}>
+      {transaction ? (
+        <QdnTransactionFlow
+          title="Edit Track"
+          state={transaction}
+          standalone={false}
+          onClose={() => {
+            setTransaction(null);
+            if (transaction.phase === 'success') onClose();
+          }}
+          onRetry={() => void handleSave()}
+        />
+      ) : (
+        <>
+          <label className="form-field">
+            Title
+            <TitleInput value={title} onChange={setTitle} artistValue={artist} />
+          </label>
+
+          <label className="form-field">
+            Artist
+            <ArtistInput value={artist} onChange={setArtist} />
+          </label>
+
+          <label className="form-field">
+            Album
+            <AlbumInput value={album} onChange={setAlbum} artistValue={artist} />
+          </label>
+
+          <label className="form-field">
+            Release date
+            <ReleaseDateInput value={releaseDate} onChange={setReleaseDate} />
+          </label>
+
+          <label className="form-field">
+            Description
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+            />
+          </label>
+
+          <div className="form-field">
+            <label>Cover Image</label>
+            <div className="upload-flow__cover-preview-wrap">
+              {coverPreview ? (
+                <img
+                  src={coverPreview}
+                  alt="New cover preview"
+                  className="upload-flow__cover-preview"
+                />
+              ) : removeCover ? (
+                <span className="upload-flow__cover-removed">Cover will be removed</span>
+              ) : (
+                <TrackCover
+                  cover={track.cover}
+                  placeholder={<div className="track-card__cover-placeholder">🎵</div>}
+                  alt={`${track.title} cover`}
+                />
+              )}
+            </div>
+            <div className="upload-flow__cover-actions">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleCoverSelected(file);
+                }}
+              />
+              {track.cover && (
+                <button
+                  className="button button--secondary"
+                  type="button"
+                  onClick={handleRemoveCover}
+                >
+                  Remove Cover
+                </button>
+              )}
+            </div>
+          </div>
+
+          <label className="form-field">
+            Genres
+            <TaxonomyInput
+              kind="genres"
+              value={genres}
+              onChange={setGenres}
+              placeholder="Rock, Electronic"
+            />
+          </label>
+
+          <label className="form-field">
+            Tags
+            <TaxonomyInput
+              kind="tags"
+              value={tags}
+              onChange={setTags}
+              placeholder="chill, upbeat, instrumental"
+            />
+          </label>
+
+          {error && <p className="form-error">{error}</p>}
+
+          <div className="form-actions">
+            <button className="button button--secondary" type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={handleSave}
+              disabled={saving || coverPublishing || !title.trim()}
+            >
+              {coverPublishing ? 'Publishing cover…' : saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}

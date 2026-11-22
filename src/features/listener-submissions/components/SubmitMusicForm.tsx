@@ -1,0 +1,496 @@
+/* ============================================================
+ * NodeFM Station — Submit Music Form
+ *
+ * Public listener-facing submission flow. The listener selects audio
+ * once through SELECT_QDN_PUBLISH_SOURCE, then NodeFM publishes the
+ * listener-owned AUDIO and JSON submission proposal. No submission
+ * metadata is published until a positive duration is resolved.
+ * ============================================================ */
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAuth } from '../../../app/providers/authContext';
+import { LoadingState } from '../../../components/LoadingState';
+import { ErrorState } from '../../../components/ErrorState';
+import {
+  PublicationProgress,
+  type PublicationProgressState,
+} from '../../../components/PublicationProgress';
+import { selectPublishSource, type SelectPublishSourceResult } from '../../../qortium/qdn';
+import { useStableAccountIdentity } from '../../../hooks/useStableAccountIdentity';
+import { generateId } from '../../../utils/id';
+import type { ListenerTrackSubmission } from '../../../types/domain';
+import { publishListenerSubmission } from '../services/submissionStore';
+import { TaxonomyInput, useTaxonomy, getCanonicalTaxonomyValues } from '../../taxonomy';
+import {
+  AlbumInput,
+  ArtistInput,
+  ReleaseDateInput,
+  TitleInput,
+  isValidReleaseDateValue,
+} from '../../metadata-intelligence';
+
+const COVER_INLINE_MAX_BYTES = 2 * 1024 * 1024;
+
+type FormState = {
+  audioSource: Exclude<SelectPublishSourceResult, { canceled: true }> | null;
+  title: string;
+  artist: string;
+  album: string;
+  releaseDate: string;
+  description: string;
+  genres: string;
+  tags: string;
+  coverFile: File | null;
+  coverBase64: string | null;
+  error: string | null;
+};
+
+function initialFormState(overrides: Partial<FormState> = {}): FormState {
+  return {
+    audioSource: null,
+    title: '',
+    artist: '',
+    album: '',
+    releaseDate: '',
+    description: '',
+    genres: '',
+    tags: '',
+    coverFile: null,
+    coverBase64: null,
+    error: null,
+    ...overrides,
+  };
+}
+
+export function SubmitMusicForm({
+  onPublished,
+  embedded = false,
+}: {
+  onPublished?: (submission: ListenerTrackSubmission) => void;
+  embedded?: boolean;
+} = {}) {
+  const { auth } = useAuth();
+  const { remember, genres: genreSuggestions, tags: tagSuggestions } = useTaxonomy();
+  const submissionIdRef = useRef(generateId());
+  const [state, setState] = useState<FormState>(initialFormState);
+  const [publication, setPublication] = useState<PublicationProgressState | null>(null);
+
+  // A lock-state-only auth refresh is not an identity change: the last
+  // resolved account is held through the transient loading state so an
+  // authored draft and any in-flight publication survive Home locking and
+  // unlocking the wallet.
+  const identity = useStableAccountIdentity(auth);
+  const submitterName = identity?.name.trim() || null;
+  const submitterAddress = identity?.address ?? null;
+  const identityKey = `${submitterAddress ?? ''}\u0000${submitterName ?? ''}`;
+  const identityKeyRef = useRef(identityKey);
+  identityKeyRef.current = identityKey;
+  const lastIdentityKeyRef = useRef<string | null>(null);
+
+  const resetForNewSubmission = useCallback(() => {
+    submissionIdRef.current = generateId();
+    setState(initialFormState());
+    setPublication(null);
+  }, []);
+
+  useEffect(() => {
+    if (lastIdentityKeyRef.current === null) {
+      lastIdentityKeyRef.current = identityKey;
+      return;
+    }
+
+    if (lastIdentityKeyRef.current !== identityKey) {
+      lastIdentityKeyRef.current = identityKey;
+      resetForNewSubmission();
+    }
+  }, [identityKey, resetForNewSubmission]);
+
+  const handleSelectAudio = useCallback(async () => {
+    const startedIdentity = identityKeyRef.current;
+
+    if (!submitterName) {
+      setState((current) => ({
+        ...current,
+        error: 'A registered Qortium name is required to submit music.',
+      }));
+      return;
+    }
+
+    setState((current) => ({ ...current, error: null }));
+
+    try {
+      const source = await selectPublishSource('file');
+
+      if (source.canceled) {
+        return;
+      }
+
+      if (identityKeyRef.current !== startedIdentity) {
+        return;
+      }
+
+      setState((current) => ({
+        ...current,
+        audioSource: source,
+        title: current.title || source.fileName.replace(/\.[^/.]+$/, ''),
+        error: null,
+      }));
+    } catch (selectError) {
+      setState((current) => ({
+        ...current,
+        error: selectError instanceof Error ? selectError.message : 'Failed to open audio picker.',
+      }));
+    }
+  }, [submitterName]);
+
+  const handleCoverSelected = useCallback(async (file: File) => {
+    if (file.size > COVER_INLINE_MAX_BYTES) {
+      setState((current) => ({
+        ...current,
+        error: `Cover image is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 2 MB.`,
+      }));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setState((current) => ({
+        ...current,
+        coverFile: file,
+        coverBase64: reader.result as string,
+        error: null,
+      }));
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handleSubmit = useCallback(async () => {
+    const startedIdentity = identityKeyRef.current;
+
+    if (!submitterName || !submitterAddress || !state.audioSource) {
+      setState((current) => ({
+        ...current,
+        error: !submitterName
+          ? 'A registered Qortium name is required to submit music.'
+          : !submitterAddress
+            ? 'An authenticated account is required to submit music.'
+            : 'Select an audio file before submitting.',
+      }));
+      return;
+    }
+
+    if (!state.title.trim()) {
+      setState((current) => ({ ...current, error: 'Title is required.' }));
+      return;
+    }
+
+    if (state.releaseDate.trim() && !isValidReleaseDateValue(state.releaseDate)) {
+      setState((current) => ({
+        ...current,
+        error: 'Release date must use YYYY, YYYY-MM, or YYYY-MM-DD.',
+      }));
+      return;
+    }
+
+    setState((current) => ({ ...current, error: null }));
+    const hasCover = Boolean(state.coverFile && state.coverBase64);
+    const rows: PublicationProgressState['rows'] = [
+      { id: 'audio', label: 'Audio file', status: 'active' },
+      ...(hasCover
+        ? [{ id: 'cover' as const, label: 'Cover image', status: 'active' as const }]
+        : []),
+      { id: 'track', label: 'Track metadata', status: 'waiting' },
+    ];
+    setPublication({ phase: 'publishing', rows });
+
+    const genres = state.genres.trim()
+      ? getCanonicalTaxonomyValues(state.genres, genreSuggestions)
+      : undefined;
+    const tags = state.tags.trim()
+      ? getCanonicalTaxonomyValues(state.tags, tagSuggestions)
+      : undefined;
+
+    const result = await publishListenerSubmission({
+      submissionId: submissionIdRef.current,
+      submitterName,
+      submitterAddress,
+      title: state.title,
+      artist: state.artist || undefined,
+      album: state.album || undefined,
+      releaseDate: state.releaseDate || undefined,
+      description: state.description || undefined,
+      genres,
+      tags,
+      audioSource: state.audioSource,
+      cover:
+        state.coverFile && state.coverBase64
+          ? {
+              fileName: state.coverFile.name,
+              bytesBase64: state.coverBase64.split(',')[1] ?? '',
+              ...(state.coverFile.type ? { mimeType: state.coverFile.type } : {}),
+            }
+          : undefined,
+    });
+
+    if (identityKeyRef.current !== startedIdentity) {
+      return;
+    }
+
+    if (result.status === 'published') {
+      remember('genres', genres ?? []);
+      remember('tags', tags ?? []);
+      onPublished?.(result.submission);
+      setPublication((current) =>
+        current
+          ? {
+              phase: 'success' as const,
+              rows: current.rows.map((row) => ({
+                ...row,
+                status: 'succeeded' as const,
+                error: undefined,
+              })),
+              error: undefined,
+            }
+          : current,
+      );
+      return;
+    }
+
+    if (result.status === 'partial') {
+      setPublication((current) =>
+        current
+          ? {
+              phase: 'failed' as const,
+              rows: current.rows.map((row) => {
+                if (row.id === 'audio') {
+                  return { ...row, status: 'succeeded' as const, error: undefined };
+                }
+                if (row.id === 'cover') {
+                  return result.cover
+                    ? { ...row, status: 'succeeded' as const, error: undefined }
+                    : { ...row, status: 'failed' as const };
+                }
+                return { ...row, status: 'failed' as const, error: result.reason };
+              }),
+              error: result.reason,
+            }
+          : current,
+      );
+      return;
+    }
+
+    setPublication((current) =>
+      current
+        ? {
+            phase: 'failed' as const,
+            rows: current.rows.map((row) => {
+              if (row.id === 'audio') {
+                return { ...row, status: 'failed' as const, error: result.reason };
+              }
+              if (row.id === 'cover') {
+                return { ...row, status: 'failed' as const };
+              }
+              return row;
+            }),
+            error: result.reason,
+          }
+        : current,
+    );
+  }, [
+    onPublished,
+    state.artist,
+    state.album,
+    state.releaseDate,
+    state.audioSource,
+    state.coverBase64,
+    state.coverFile,
+    state.description,
+    state.genres,
+    state.tags,
+    state.title,
+    submitterAddress,
+    submitterName,
+    genreSuggestions,
+    tagSuggestions,
+    remember,
+  ]);
+
+  // Only the first identity resolution may replace the form with a loading
+  // screen. A lock-state refresh keeps the resolved identity, so the draft and
+  // any in-flight publication progress stay mounted.
+  if (auth.status === 'loading' && !identity) {
+    return <LoadingState message="Checking Qortium identity…" />;
+  }
+
+  if (auth.status === 'unauthenticated') {
+    return (
+      <ErrorState
+        message="Sign in to submit music"
+        detail="Select a Qortium account in Home before submitting music to NodeFM."
+      />
+    );
+  }
+
+  if (!submitterName) {
+    return (
+      <ErrorState
+        message="A registered Qortium name is required"
+        detail="Your selected account does not have a registered Qortium name, which is required to publish QDN resources."
+      />
+    );
+  }
+
+  if (publication) {
+    const title = publication.phase === 'success' ? 'Track Published' : 'Publishing Track';
+
+    return (
+      <PublicationProgress
+        title={title}
+        state={publication}
+        successMessage="Track published successfully."
+        onClose={resetForNewSubmission}
+        onSuccess={resetForNewSubmission}
+        standalone={!embedded}
+      />
+    );
+  }
+
+  return (
+    <form
+      className="submit-music"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void handleSubmit();
+      }}
+    >
+      <div className="submit-music__intro">
+        <p>
+          Submit music for possible inclusion in NodeFM Station. Your audio stays published under
+          your Qortium name. The station owner reviews each submission before it can enter the
+          station library.
+        </p>
+      </div>
+
+      <div className="form-field">
+        <span>Audio file</span>
+        <div className="submit-music__audio">
+          {state.audioSource ? (
+            <span className="submit-music__file">
+              {state.audioSource.fileName} ({(state.audioSource.size / 1024 / 1024).toFixed(1)} MB)
+            </span>
+          ) : (
+            <span className="submit-music__file">No audio selected.</span>
+          )}
+          <button
+            className="button button--secondary"
+            type="button"
+            onClick={handleSelectAudio}
+            disabled={!submitterName}
+          >
+            {state.audioSource ? 'Select Different Audio' : 'Select Audio File'}
+          </button>
+        </div>
+        <p className="submit-music__hint">Supported formats: MP3, WAV, FLAC, OGG, AAC, M4A</p>
+      </div>
+
+      <label className="form-field">
+        Title
+        <TitleInput
+          value={state.title}
+          onChange={(value) => setState((current) => ({ ...current, title: value }))}
+          artistValue={state.artist}
+          placeholder="Track title"
+        />
+      </label>
+
+      <label className="form-field">
+        Artist
+        <ArtistInput
+          value={state.artist}
+          onChange={(value) => setState((current) => ({ ...current, artist: value }))}
+          placeholder="Artist name"
+        />
+      </label>
+
+      <label className="form-field">
+        Album
+        <AlbumInput
+          value={state.album}
+          onChange={(value) => setState((current) => ({ ...current, album: value }))}
+          artistValue={state.artist}
+          placeholder="Optional album name"
+        />
+      </label>
+
+      <label className="form-field">
+        Release date
+        <ReleaseDateInput
+          value={state.releaseDate}
+          onChange={(value) => setState((current) => ({ ...current, releaseDate: value }))}
+          placeholder="1991-08-12"
+        />
+      </label>
+
+      <label className="form-field">
+        Description
+        <textarea
+          value={state.description}
+          onChange={(event) =>
+            setState((current) => ({ ...current, description: event.target.value }))
+          }
+          placeholder="Optional description"
+          rows={3}
+        />
+      </label>
+
+      <label className="form-field">
+        Genres
+        <TaxonomyInput
+          kind="genres"
+          value={state.genres}
+          onChange={(value) => setState((current) => ({ ...current, genres: value }))}
+          placeholder="Rock, Electronic, Jazz"
+        />
+      </label>
+
+      <label className="form-field">
+        Tags
+        <TaxonomyInput
+          kind="tags"
+          value={state.tags}
+          onChange={(value) => setState((current) => ({ ...current, tags: value }))}
+          placeholder="chill, upbeat, instrumental"
+        />
+      </label>
+
+      <div className="form-field">
+        <label>Cover Image (optional, max 2 MB)</label>
+        <input
+          type="file"
+          accept="image/*"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              void handleCoverSelected(file);
+            }
+          }}
+        />
+        {state.coverBase64 ? (
+          <img src={state.coverBase64} alt="Cover preview" className="upload-flow__cover-preview" />
+        ) : null}
+      </div>
+
+      {state.error ? <p className="form-error">{state.error}</p> : null}
+
+      <div className="form-actions">
+        <button
+          className="button button--primary"
+          type="submit"
+          disabled={!state.audioSource || !state.title.trim() || !submitterName}
+        >
+          Submit Music
+        </button>
+      </div>
+    </form>
+  );
+}

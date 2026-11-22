@@ -1,0 +1,345 @@
+/* ============================================================
+ * NodeFM Station — Radio Page (Public)
+ *
+ * The primary listener experience.
+ * Phase 1: Shell only. Live player and timeline come in Phase 3.
+ * ============================================================ */
+
+import { PageShell } from '../components/PageShell';
+import { useLiveRadioPlayerContext } from '../features/radio/player';
+import { StationMusicScopeBadge, useStation } from '../features/station';
+import { useAuth } from '../app/providers/authContext';
+import { useLikes } from '../features/likes/useLikes';
+import { formatDurationMs } from '../utils/duration';
+import { formatUtcTime } from '../utils/utcTime';
+import {
+  formatScheduleTimeDisplay,
+  formatStationTimeContext,
+  formatStationTimeInput,
+} from '../utils/stationTime';
+import { useEffect, useState } from 'react';
+import type { Track } from '../types/domain';
+import { MessageOwnerModal } from '../features/messaging';
+import { TipOwnerModal } from '../features/tips';
+import { ShareModal } from '../features/sharing';
+import { StationNotices } from '../features/notices/components';
+import { TrackDetailModal } from '../features/tracks';
+import { recordStartupEvent } from '../services/perf/startupDiagnostics';
+import { LiveRadioLoadingIndicator } from '../features/radio/components/LiveRadioLoadingIndicator';
+
+export default function RadioPage() {
+  const { playerState, timeline, playbackError, playbackWarning, retry } =
+    useLiveRadioPlayerContext();
+  const { station, loading: stationLoading, refresh: refreshStation } = useStation();
+  const { auth } = useAuth();
+  const stationTimeZone = station?.timezone ?? '';
+  const liveState = timeline.liveState;
+  const currentTrack = timeline.currentTrack;
+  const displayTitle = currentTrack?.title ?? playerState.currentTrack?.title ?? '—';
+  const displayArtist =
+    currentTrack?.artist ??
+    playerState.currentTrack?.artist ??
+    (stationLoading ? 'Loading station…' : 'No track playing');
+  const currentTrackId = currentTrack?.trackId ?? '';
+  const {
+    isLiked,
+    getLikeCount,
+    toggleLike,
+    loading: likesLoading,
+    error: likesLoadError,
+    incomplete: likesIncomplete,
+  } = useLikes(currentTrackId ? [currentTrackId] : []);
+  const [likeError, setLikeError] = useState<string | null>(null);
+  const [messageOpen, setMessageOpen] = useState(false);
+  const [tipOpen, setTipOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [detailTrack, setDetailTrack] = useState<Track | null>(null);
+  const hasNoStation = timeline.stationLoaded && !station && !timeline.stationLoading;
+
+  useEffect(() => {
+    if (timeline.upcoming.length > 0) {
+      recordStartupEvent('COMING_UP_USABLE', {
+        completion: 'success',
+        resultCount: timeline.upcoming.length,
+      });
+    }
+  }, [timeline.upcoming.length]);
+
+  useEffect(() => {
+    if (timeline.dataLoaded || timeline.dataError) {
+      recordStartupEvent('SCHEDULE_USABLE', {
+        completion: timeline.dataError
+          ? 'error'
+          : timeline.scheduleEvents.length > 0
+            ? 'success'
+            : 'empty',
+        resultCount: timeline.scheduleEvents.length,
+        detail: timeline.dataError ?? undefined,
+      });
+    }
+  }, [timeline.dataError, timeline.dataLoaded, timeline.scheduleEvents.length]);
+
+  const handleLike = async () => {
+    if (!currentTrackId) {
+      return;
+    }
+
+    if (auth.status !== 'authenticated') {
+      setLikeError('Select a Qortium account to Like tracks.');
+      return;
+    }
+
+    try {
+      setLikeError(null);
+      await toggleLike(currentTrackId);
+    } catch (error) {
+      setLikeError(error instanceof Error ? error.message : 'Failed to update Like.');
+    }
+  };
+
+  return (
+    <PageShell title={station?.name ?? 'NodeFM Radio'}>
+      <div className="radio-page">
+        {/* Now Playing Section */}
+        <section className="radio-page__hero" aria-label="Now playing">
+          <div className="radio-page__hero-signal" aria-hidden="true" />
+          <div className="radio-page__now-playing">
+            <div className="now-playing__cover">
+              {playerState.currentTrack?.coverUrl ? (
+                <img
+                  className="now-playing__cover-image"
+                  src={playerState.currentTrack.coverUrl}
+                  alt=""
+                />
+              ) : (
+                <div className="now-playing__cover-placeholder" aria-hidden="true">
+                  <span className="signal-cover__core signal-cover__core--lg" />
+                </div>
+              )}
+            </div>
+            <div className="now-playing__info">
+              <div className="now-playing__status-row">
+                <span
+                  className={`now-playing__live-badge${
+                    liveState?.mode === 'scheduled' ? ' now-playing__live-badge--scheduled' : ''
+                  }`}
+                >
+                  {liveState?.mode === 'scheduled' ? 'SCHEDULED' : 'AutoDJ-LIVE'}
+                </span>
+              </div>
+              <h2 className="now-playing__title">{displayTitle}</h2>
+              <p className="now-playing__artist">{displayArtist}</p>
+              {liveState?.programTitle && (
+                <p className="now-playing__program">{liveState.programTitle}</p>
+              )}
+              <StationMusicScopeBadge musicScope={station?.musicScope} />
+              {currentTrack && (
+                <p className="now-playing__track-time">
+                  {formatDurationMs(currentTrack.durationMs)} track duration
+                </p>
+              )}
+              {(currentTrack || station) && (
+                <div className="now-playing__actions">
+                  {currentTrack && (
+                    <button
+                      className="button button--secondary"
+                      type="button"
+                      onClick={() => setDetailTrack(currentTrack)}
+                    >
+                      Track Details
+                    </button>
+                  )}
+                  {currentTrack && (
+                    <button
+                      className={`button ${
+                        isLiked(currentTrack.trackId) ? 'button--liked' : 'button--like'
+                      }`}
+                      type="button"
+                      onClick={handleLike}
+                      aria-pressed={isLiked(currentTrack.trackId)}
+                      disabled={likesLoading}
+                    >
+                      <span className="now-playing__like-icon" aria-hidden="true">
+                        {isLiked(currentTrack.trackId) ? '♥' : '♡'}
+                      </span>
+                      <span>{isLiked(currentTrack.trackId) ? 'Liked' : 'Like'}</span>
+                      <span className="now-playing__like-count">
+                        {getLikeCount(currentTrack.trackId)}
+                      </span>
+                    </button>
+                  )}
+                  {station && (
+                    <button
+                      className="button button--secondary"
+                      type="button"
+                      onClick={() => setMessageOpen(true)}
+                      title={
+                        station.messagingEnabled ? undefined : 'Station messaging is disabled.'
+                      }
+                    >
+                      Message Owner
+                    </button>
+                  )}
+                  {station && (
+                    <button
+                      className="button button--secondary"
+                      type="button"
+                      onClick={() => setTipOpen(true)}
+                      title={
+                        station.tipsEnabled ? undefined : 'Station tips/donations are disabled.'
+                      }
+                    >
+                      Tip Station
+                    </button>
+                  )}
+                  {station && (
+                    <button
+                      className="button button--secondary"
+                      type="button"
+                      onClick={() => setShareOpen(true)}
+                    >
+                      Share
+                    </button>
+                  )}
+                </div>
+              )}
+              {currentTrack && (likeError || likesLoadError || likesIncomplete) ? (
+                <div className="now-playing__action-errors">
+                  {likeError ? <p className="now-playing__error">{likeError}</p> : null}
+                  {likesLoadError ? (
+                    <p className="now-playing__error">Like data unavailable: {likesLoadError}</p>
+                  ) : null}
+                  {likesIncomplete ? (
+                    <p className="now-playing__error">
+                      Like data is incomplete and may not reflect all Likes.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+              {playbackError && (
+                <p className="now-playing__error">
+                  {playbackError}{' '}
+                  <button className="button button--secondary" type="button" onClick={retry}>
+                    Retry
+                  </button>
+                </p>
+              )}
+              {!playbackError && playbackWarning && (
+                <p className="now-playing__error">{playbackWarning}</p>
+              )}
+              {timeline.stationError && (
+                <p className="now-playing__error">
+                  {timeline.stationError}{' '}
+                  <button
+                    className="button button--secondary"
+                    type="button"
+                    onClick={refreshStation}
+                  >
+                    Retry
+                  </button>
+                </p>
+              )}
+              {timeline.dataError && (
+                <p className="now-playing__error">
+                  {timeline.dataError}{' '}
+                  <button
+                    className="button button--secondary"
+                    type="button"
+                    onClick={timeline.refreshData}
+                  >
+                    Retry
+                  </button>
+                </p>
+              )}
+              {hasNoStation && (
+                <p className="radio-page__placeholder">No station program is configured yet.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="radio-page__notices">
+            <StationNotices nowUtcMs={timeline.nowUtcMs} />
+          </div>
+          <LiveRadioLoadingIndicator />
+        </section>
+
+        {/* Upcoming Section */}
+        <section className="radio-page__upcoming">
+          <h3>
+            Coming Up
+            <span className="radio-page__section-context">
+              {formatStationTimeContext(stationTimeZone)}
+            </span>
+          </h3>
+          {timeline.dataLoading ? (
+            <p className="radio-page__placeholder">Loading upcoming tracks…</p>
+          ) : timeline.upcoming.length > 0 ? (
+            <ol className="radio-page__upcoming-list">
+              {timeline.upcoming.map((item, index) => (
+                <li key={`${item.expectedStartUtcMs}-${item.trackId}-${index}`}>
+                  <span className="radio-page__upcoming-track">
+                    {item.title ?? item.trackId}
+                    {item.artist ? ` — ${item.artist}` : ''}
+                  </span>
+                  <span
+                    className="radio-page__upcoming-time"
+                    title={`UTC ${formatUtcTime(item.expectedStartUtcMs)}`}
+                  >
+                    {formatStationTimeInput(item.expectedStartUtcMs, stationTimeZone)}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="radio-page__placeholder">No upcoming tracks available.</p>
+          )}
+        </section>
+
+        {/* Schedule Section */}
+        <section className="radio-page__schedule">
+          <h3>Upcoming Schedule</h3>
+          {timeline.scheduleEvents.length === 0 ? (
+            <p className="radio-page__placeholder">No scheduled programs available.</p>
+          ) : (
+            <ol className="radio-page__upcoming-list">
+              {timeline.scheduleEvents
+                .filter((event) => Date.parse(event.endUtc) > timeline.nowUtcMs)
+                .sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc))
+                .slice(0, 6)
+                .map((event) => {
+                  const display = formatScheduleTimeDisplay(
+                    event.startUtc,
+                    event.endUtc,
+                    stationTimeZone,
+                  );
+
+                  return (
+                    <li key={event.eventId}>
+                      <span className="radio-page__upcoming-track">
+                        {event.title ?? 'Scheduled program'}
+                      </span>
+                      <span className="radio-page__upcoming-time radio-page__upcoming-time--stacked">
+                        <span className="radio-page__upcoming-time-main">
+                          {display.stationDate} · {display.stationTimeRange} ·{' '}
+                          {display.durationMinutes}
+                        </span>
+                        <span className="radio-page__upcoming-time-utc">
+                          {display.utcTimeRange}
+                        </span>
+                      </span>
+                    </li>
+                  );
+                })}
+            </ol>
+          )}
+        </section>
+      </div>
+      {station && messageOpen && (
+        <MessageOwnerModal station={station} onClose={() => setMessageOpen(false)} />
+      )}
+      {station && tipOpen && <TipOwnerModal station={station} onClose={() => setTipOpen(false)} />}
+      {shareOpen && <ShareModal target={{ kind: 'app' }} onClose={() => setShareOpen(false)} />}
+      {detailTrack && <TrackDetailModal track={detailTrack} onClose={() => setDetailTrack(null)} />}
+    </PageShell>
+  );
+}

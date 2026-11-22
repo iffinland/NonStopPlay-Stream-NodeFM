@@ -1,63 +1,77 @@
-# React + TypeScript + Vite
+# NodeFM Station
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+NodeFM is a Qortium-native scheduled 24/7 Auto-DJ radio dApp. A listener joins
+the deterministic broadcast position derived from current time, schedule,
+immutable playlist versions, verified track durations, and default rotation;
+the station does not require a continuously running streaming backend.
 
-Currently, two official plugins are available:
+## Current status
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+The original specification phases 0–7 were implemented and owner-validated,
+after which the project entered active beta/hardening and continued through
+listener playlists, listener submissions/moderation, resilience, transaction
+UX, and cold-start optimization work.
 
-## Expanding the ESLint configuration
+Do not use the old phrase “Phase 8 not started” as current status. The roadmap
+now records Phase 8 as active and points to current source, Git state, and
+canonical reports for task-level evidence. The latest local working tree may
+contain owner changes and must be inspected before work.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Product scope
 
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-});
+- deterministic live radio timeline and default rotation;
+- station schedules and immutable playlist versions;
+- global audio engine with live and playlist modes;
+- music library and QDN media flows;
+- listener likes, uploads/submissions, and owned playlists;
+- Request Show, station messages, tips/donations, and admin workflows.
+
+The future Q-Music-style creator/community platform is a separate product. Do
+not port or reuse old Q-Music/Qortal architecture as NodeFM's foundation.
+
+## Durable specifications
+
+1. [`docs/PROJECT-VISION.md`](docs/PROJECT-VISION.md)
+2. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+3. [`docs/QORTIUM-DATA-MODEL.md`](docs/QORTIUM-DATA-MODEL.md)
+4. [`docs/RADIO-TIMELINE-SPEC.md`](docs/RADIO-TIMELINE-SPEC.md)
+5. [`docs/PLAYER-SPEC.md`](docs/PLAYER-SPEC.md)
+6. [`docs/ADMIN-SPEC.md`](docs/ADMIN-SPEC.md)
+7. [`docs/ROADMAP.md`](docs/ROADMAP.md)
+8. [`docs/RELEASE.md`](docs/RELEASE.md)
+
+Current source is authoritative for implemented behavior. The roadmap is a
+product-plan/history document, not a substitute for a fresh source and Git
+baseline.
+
+## Development
+
+```bash
+npm ci
+npm run dev
+npm run test
+npm run build
+npm run lint
+npm run format:check
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Local preview, mocks, tests, and build output do not prove embedded Home,
+deployed QDN, playback, persistence, or transaction behavior.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x';
-import reactDom from 'eslint-plugin-react-dom';
+## Agent routing and reports
 
-export default tseslint.config({
-  plugins: {
-    // Add the react-x and react-dom plugins
-    'react-x': reactX,
-    'react-dom': reactDom,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended typescript rules
-    ...reactX.configs['recommended-typescript'].rules,
-    ...reactDom.configs.recommended.rules,
-  },
-});
-```
+- [`AGENTS.md`](AGENTS.md) — project entry point for AI-assisted work.
+- Canonical project context:
+  `/home/iffi/VsCodec-Projects/Qortium/qortium-dev-workspace/projects/nodefm-station.md`
+- AI work reports belong under
+  `/home/iffi/VsCodec-Projects/Qortium/docs/nodefm-station/`.
 
-## Internationalization of the app (I18N)
+The application `docs/` directory is reserved for durable specifications and
+operator/release documentation.
 
-This template supports internationalization (i18n) using [i18next](https://www.i18next.com/), allowing seamless translation of UI text into multiple languages.
-The setup includes modularized translation files (namespaces), language detection, context and runtime language switching.
+## Release boundary
 
-Files with translation are in `src/i18n/locales/<locale>` folder.
-
-`core` namespace is already present and active.
+Build, commit, push, tag, release, deployment, signing, payments, moderation,
+and QDN publication require explicit owner authorization. Follow
+[`docs/RELEASE.md`](docs/RELEASE.md) and record exact source/artifact/deployment
+provenance.

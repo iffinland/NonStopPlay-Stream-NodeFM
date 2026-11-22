@@ -1,0 +1,1087 @@
+/* ============================================================
+ * NodeFM Station — Listener Track Submission Store
+ *
+ * QDN-backed publication, discovery, identity validation, and owner
+ * moderation for listener track submissions.
+ *
+ * Listener submissions are immutable listener-owned JSON resources.
+ * Owner moderation is a separate station-owned JSON resource under the
+ * canonical station publisher name. A listener can never publish a
+ * moderation record under the station publisher name, and the store
+ * rejects moderation records from any other publisher.
+ * ============================================================ */
+
+import type {
+  ListenerTrackSubmission,
+  QdnResourceRef,
+  SubmissionModeration,
+  SubmissionModerationDecision,
+} from '../../../types/domain';
+import {
+  ensureQdnResourceReady,
+  fetchQdnResourceData,
+  getQdnResourceUrl,
+  publishMultipleResources,
+  publishResource,
+  searchQdnResources,
+  qdnJsonPublishFileName,
+  type SelectPublishSourceResult,
+} from '../../../qortium/qdn';
+import type { PublishMultipleResource } from '../../../qortium/qdn';
+import { resolveNameWalletAddress } from '../../../qortium/identity';
+import { resolveAudioDurationFromUrl } from '../../../utils/duration';
+import { isConfirmedQdnNotFoundError } from '../../../qortium/qdnReadError';
+import {
+  getTrackById,
+  trackPublishResource,
+  upsertTrackLocally,
+} from '../../library/services/libraryService';
+import { createTrack } from '../../tracks/services/trackService';
+import {
+  isValidReleaseDateValue,
+  normalizeReleaseDateInput,
+} from '../../metadata-intelligence/releaseDate';
+import {
+  SUBMISSION_IDENTIFIER_PREFIX,
+  SUBMISSION_QDN_SERVICE,
+  createListenerTrackSubmission,
+  createSubmissionModeration,
+  deserializeSubmissionFromQdn,
+  deserializeSubmissionModerationFromQdn,
+  getAcceptedSubmissionTrackId,
+  getSubmissionAudioQdnIdentifier,
+  getSubmissionCoverQdnIdentifier,
+  getSubmissionModerationQdnIdentifier,
+  getSubmissionQdnIdentifier,
+  isSubmissionQdnIdentifier,
+  isSubmissionModerationQdnIdentifier,
+  normalizeSubmissionName,
+  serializeSubmissionForQdn,
+  serializeSubmissionModerationForQdn,
+  validateSubmissionStructuralIntegrity,
+  type SubmissionDiagnostic,
+  type SubmissionDiagnosticCode,
+} from './submissionService';
+
+type SubmissionListener = () => void;
+
+export type SubmissionReviewStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'UNRESOLVED';
+
+export type ListenerSubmissionMetadata = {
+  service: string;
+  publisherName: string;
+  identifier: string;
+  created: number;
+  updated: number | null;
+};
+
+export type ListenerSubmissionReview = {
+  metadata: ListenerSubmissionMetadata;
+  submission: ListenerTrackSubmission;
+  status: SubmissionReviewStatus;
+  moderation: SubmissionModeration | null;
+  moderationError?: string;
+};
+
+export type SubmissionPublishInput = {
+  submissionId: string;
+  submitterName: string;
+  submitterAddress: string;
+  title: string;
+  artist?: string;
+  album?: string;
+  releaseDate?: string;
+  description?: string;
+  genres?: string[];
+  tags?: string[];
+  audioSource: Exclude<SelectPublishSourceResult, { canceled: true }>;
+  cover?: {
+    fileName: string;
+    bytesBase64: string;
+    mimeType?: string;
+  };
+};
+
+export type SubmissionPublishResult =
+  | {
+      status: 'published';
+      submission: ListenerTrackSubmission;
+    }
+  | {
+      status: 'partial';
+      reason: string;
+      audio: QdnResourceRef;
+      cover?: QdnResourceRef;
+      submissionDraft?: ListenerTrackSubmission;
+    }
+  | {
+      status: 'failed';
+      reason: string;
+    };
+
+export type AcceptSubmissionResult =
+  | {
+      status: 'accepted';
+      track: ReturnType<typeof createTrack>;
+      moderation: SubmissionModeration;
+    }
+  | {
+      status: 'already-accepted';
+      track: ReturnType<typeof createTrack>;
+      moderation: SubmissionModeration;
+    };
+
+export class SubmissionModerationWriteError extends Error {
+  readonly track?: ReturnType<typeof createTrack>;
+
+  constructor(message: string, track?: ReturnType<typeof createTrack>) {
+    super(message);
+    this.name = 'SubmissionModerationWriteError';
+    this.track = track;
+  }
+}
+
+let reviews: ListenerSubmissionReview[] = [];
+let diagnostics: SubmissionDiagnostic[] = [];
+let loaded = false;
+let loading = false;
+let error: string | null = null;
+let incomplete = false;
+let scope: string | null = null;
+let epoch = 0;
+let loadPromise: Promise<void> | null = null;
+
+const listeners = new Set<SubmissionListener>();
+
+function notify() {
+  listeners.forEach((listener) => listener());
+}
+
+function metadataFromResult(result: {
+  name?: string;
+  service?: string;
+  identifier?: string;
+  created?: number;
+  updated?: number;
+}): ListenerSubmissionMetadata | null {
+  if (
+    typeof result.name !== 'string' ||
+    !result.name.trim() ||
+    typeof result.service !== 'string' ||
+    !result.service.trim() ||
+    typeof result.identifier !== 'string' ||
+    !result.identifier.trim() ||
+    typeof result.created !== 'number' ||
+    !Number.isSafeInteger(result.created)
+  ) {
+    return null;
+  }
+
+  return {
+    service: result.service.trim(),
+    publisherName: result.name.trim(),
+    identifier: result.identifier.trim(),
+    created: result.created,
+    updated:
+      typeof result.updated === 'number' && Number.isSafeInteger(result.updated)
+        ? result.updated
+        : null,
+  };
+}
+
+function isMissingResourceError(value: unknown): boolean {
+  return isConfirmedQdnNotFoundError(value);
+}
+
+function diagnostic(
+  code: SubmissionDiagnosticCode,
+  identifier: string,
+  detail: string,
+): SubmissionDiagnostic {
+  return { code, identifier, detail };
+}
+
+function normalizeWalletAddress(value: string): string {
+  return value.trim();
+}
+
+// ── Subscriptions and accessors ────────────────────────────────────
+
+export function subscribeToSubmissionStore(listener: SubmissionListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+export function getSubmissionReviews(): ListenerSubmissionReview[] {
+  return reviews.map((review) => ({
+    ...review,
+    metadata: { ...review.metadata },
+    submission: { ...review.submission },
+    moderation: review.moderation ? { ...review.moderation } : null,
+  }));
+}
+
+export function getSubmissionLoaded(): boolean {
+  return loaded;
+}
+
+export function getSubmissionLoading(): boolean {
+  return loading;
+}
+
+export function getSubmissionError(): string | null {
+  return error;
+}
+
+export function getSubmissionIncomplete(): boolean {
+  return incomplete;
+}
+
+export function getSubmissionDiagnostics(): SubmissionDiagnostic[] {
+  return [...diagnostics];
+}
+
+// ── Listener publication ───────────────────────────────────────────
+
+/**
+ * Publish a listener-owned AUDIO (and optional IMAGE cover) and then the
+ * immutable JSON submission proposal. This function never publishes the
+ * final submission metadata until a finite, positive duration is resolved.
+ *
+ * Publication is coordinated at the application layer, not atomic. Partial
+ * results preserve the already-published media references so a caller can
+ * retry metadata publication without re-selecting or re-publishing media.
+ */
+export async function publishListenerSubmission(
+  input: SubmissionPublishInput,
+): Promise<SubmissionPublishResult> {
+  if (!input.submitterName.trim()) {
+    return {
+      status: 'failed',
+      reason: 'A registered Qortium name is required to publish a submission.',
+    };
+  }
+
+  if (!input.submitterAddress.trim()) {
+    return {
+      status: 'failed',
+      reason: 'An authenticated account is required to publish a submission.',
+    };
+  }
+
+  if (!input.title.trim()) {
+    return {
+      status: 'failed',
+      reason: 'A submission title is required.',
+    };
+  }
+
+  if (input.album !== undefined && typeof input.album !== 'string') {
+    return {
+      status: 'failed',
+      reason: 'Submission album must be a string.',
+    };
+  }
+
+  if (input.releaseDate !== undefined) {
+    if (typeof input.releaseDate !== 'string') {
+      return {
+        status: 'failed',
+        reason: 'Submission release date must be a string.',
+      };
+    }
+
+    const releaseDate = normalizeReleaseDateInput(input.releaseDate);
+    if (releaseDate && !isValidReleaseDateValue(releaseDate)) {
+      return {
+        status: 'failed',
+        reason: 'Submission release date must use YYYY, YYYY-MM, or YYYY-MM-DD.',
+      };
+    }
+  }
+
+  if (
+    input.genres !== undefined &&
+    (!Array.isArray(input.genres) || input.genres.some((entry) => !entry.trim()))
+  ) {
+    return {
+      status: 'failed',
+      reason: 'Submission genres must be non-empty strings.',
+    };
+  }
+
+  if (
+    input.tags !== undefined &&
+    (!Array.isArray(input.tags) || input.tags.some((entry) => !entry.trim()))
+  ) {
+    return {
+      status: 'failed',
+      reason: 'Submission tags must be non-empty strings.',
+    };
+  }
+
+  if (!input.audioSource || input.audioSource.canceled) {
+    return {
+      status: 'failed',
+      reason: 'An audio source is required.',
+    };
+  }
+
+  const audioIdentifier = getSubmissionAudioQdnIdentifier(input.submissionId);
+  const audioRef: QdnResourceRef = {
+    service: 'AUDIO',
+    name: input.submitterName.trim(),
+    identifier: audioIdentifier,
+  };
+  const audioResource: PublishMultipleResource = {
+    service: 'AUDIO',
+    name: input.submitterName.trim(),
+    identifier: audioIdentifier,
+    sourceToken: input.audioSource.sourceToken,
+    title: input.title.trim(),
+  };
+  let coverRef: QdnResourceRef | undefined;
+  const coverIdentifier = input.cover
+    ? getSubmissionCoverQdnIdentifier(input.submissionId)
+    : undefined;
+  const coverResource: PublishMultipleResource | undefined = input.cover
+    ? {
+        service: 'IMAGE',
+        name: input.submitterName.trim(),
+        identifier: coverIdentifier!,
+        bytesBase64: input.cover.bytesBase64,
+        fileName: input.cover.fileName,
+        ...(input.cover.mimeType ? { mimeType: input.cover.mimeType } : {}),
+        title: `${input.title.trim()} cover`,
+      }
+    : undefined;
+
+  try {
+    const mediaResources = coverResource ? [audioResource, coverResource] : [audioResource];
+    const mediaResponse = await publishMultipleResources(mediaResources);
+    const audioPublished =
+      mediaResponse.accepted &&
+      mediaResponse.published.some((entry) => entry.resource.identifier === audioIdentifier);
+
+    if (!audioPublished) {
+      return {
+        status: 'failed',
+        reason:
+          mediaResponse.failures.find((entry) => entry.resource.identifier === audioIdentifier)
+            ?.error ?? 'Audio publication was not accepted.',
+      };
+    }
+
+    if (coverResource && coverIdentifier) {
+      const coverPublished = mediaResponse.published.some(
+        (entry) => entry.resource.identifier === coverIdentifier,
+      );
+      if (coverPublished) {
+        coverRef = {
+          service: 'IMAGE',
+          name: input.submitterName.trim(),
+          identifier: coverIdentifier,
+        };
+      }
+    }
+  } catch (publishError) {
+    return {
+      status: 'failed',
+      reason: publishError instanceof Error ? publishError.message : 'Audio publication failed.',
+    };
+  }
+
+  let durationMs: number | null = null;
+  let durationReason = '';
+
+  try {
+    await ensureQdnResourceReady(audioRef);
+    const audioUrl = await getQdnResourceUrl(audioRef);
+    durationMs = await resolveAudioDurationFromUrl(audioUrl);
+
+    if (!Number.isFinite(durationMs) || durationMs <= 0) {
+      durationMs = null;
+      durationReason = 'Resolved audio duration is not a positive finite value.';
+    }
+  } catch (durationError) {
+    durationReason =
+      durationError instanceof Error ? durationError.message : 'Audio duration resolution failed.';
+  }
+
+  if (durationMs === null) {
+    return {
+      status: 'partial',
+      reason: durationReason || 'Audio duration could not be resolved.',
+      audio: audioRef,
+      cover: coverRef,
+    };
+  }
+
+  const submissionDraft = createListenerTrackSubmission({
+    submissionId: input.submissionId,
+    submitterName: input.submitterName.trim(),
+    submitterAddress: input.submitterAddress.trim(),
+    title: input.title,
+    artist: input.artist,
+    album: input.album,
+    releaseDate: input.releaseDate,
+    description: input.description,
+    audio: audioRef,
+    cover: coverRef,
+    durationMs,
+    genres: input.genres,
+    tags: input.tags,
+  });
+
+  try {
+    const submissionIdentifier = getSubmissionQdnIdentifier(input.submissionId);
+    const submissionResult = await publishResource({
+      service: SUBMISSION_QDN_SERVICE,
+      name: input.submitterName.trim(),
+      identifier: submissionIdentifier,
+      bytesBase64: btoa(unescape(encodeURIComponent(serializeSubmissionForQdn(submissionDraft)))),
+      fileName: qdnJsonPublishFileName(submissionIdentifier),
+      mimeType: 'application/json',
+      title: submissionDraft.title,
+      description: submissionDraft.description,
+      tags: submissionDraft.tags,
+    });
+
+    if (!submissionResult.accepted) {
+      throw new Error('Submission metadata publication was not accepted.');
+    }
+  } catch (metadataError) {
+    return {
+      status: 'partial',
+      reason:
+        metadataError instanceof Error
+          ? metadataError.message
+          : 'Submission metadata publication failed.',
+      audio: audioRef,
+      cover: coverRef,
+      submissionDraft,
+    };
+  }
+
+  return {
+    status: 'published',
+    submission: submissionDraft,
+  };
+}
+
+/**
+ * Retry only the JSON submission-metadata publication after media already
+ * published. This deliberately reuses the canonical media references and
+ * never accepts a new source token or file input.
+ */
+export async function publishSubmissionMetadata(
+  submission: ListenerTrackSubmission,
+  submitterName: string,
+): Promise<{ accepted: true }> {
+  if (
+    normalizeSubmissionName(submission.submitterName) !== normalizeSubmissionName(submitterName)
+  ) {
+    throw new Error('Submission publisher does not match the acting account name.');
+  }
+
+  const submissionIdentifier = getSubmissionQdnIdentifier(submission.submissionId);
+  const result = await publishResource({
+    service: SUBMISSION_QDN_SERVICE,
+    name: submission.submitterName,
+    identifier: submissionIdentifier,
+    bytesBase64: btoa(unescape(encodeURIComponent(serializeSubmissionForQdn(submission)))),
+    fileName: qdnJsonPublishFileName(submissionIdentifier),
+    mimeType: 'application/json',
+    title: submission.title,
+    description: submission.description,
+    tags: submission.tags,
+  });
+
+  if (!result.accepted) {
+    throw new Error('Submission metadata publication was not accepted.');
+  }
+
+  return { accepted: true };
+}
+
+// ── Discovery ──────────────────────────────────────────────────────
+
+type SubmissionLoadSnapshot = {
+  reviews: ListenerSubmissionReview[];
+  diagnostics: SubmissionDiagnostic[];
+  incomplete: boolean;
+};
+
+async function loadReviewRecordsInternal(
+  stationPublisherName: string,
+  ownerAddress: string,
+): Promise<SubmissionLoadSnapshot> {
+  const nextDiagnostics: SubmissionDiagnostic[] = [];
+  let nextIncomplete = false;
+
+  const results = await searchQdnResources({
+    service: SUBMISSION_QDN_SERVICE,
+    query: SUBMISSION_IDENTIFIER_PREFIX,
+    prefix: true,
+    mode: 'ALL',
+    limit: 1000,
+    includeMetadata: true,
+  });
+
+  const pendingReviews: Array<Omit<ListenerSubmissionReview, 'status' | 'moderation'>> = [];
+  const walletByName = new Map<string, string | null>();
+
+  for (const result of results) {
+    const metadata = metadataFromResult(result);
+    const identifier = typeof result.identifier === 'string' ? result.identifier : '<unknown>';
+
+    if (typeof result.identifier === 'string' && !isSubmissionQdnIdentifier(identifier)) {
+      // Search can legitimately return station-owned moderation resources
+      // when their identifiers share a submission-like prefix. Classify by
+      // exact resource type before fetching/parsing anything as a listener
+      // submission.
+      continue;
+    }
+
+    if (typeof result.identifier === 'string' && isSubmissionModerationQdnIdentifier(identifier)) {
+      continue;
+    }
+
+    if (!metadata) {
+      nextDiagnostics.push(
+        diagnostic(
+          'INVALID_METADATA',
+          identifier,
+          'Submission discovery result is missing trusted QDN metadata.',
+        ),
+      );
+      nextIncomplete = true;
+      continue;
+    }
+
+    if (
+      !isSubmissionQdnIdentifier(metadata.identifier) ||
+      isSubmissionModerationQdnIdentifier(metadata.identifier)
+    ) {
+      continue;
+    }
+
+    const uniqueKey = `${metadata.publisherName}\u0000${metadata.identifier}`;
+    if (
+      pendingReviews.some(
+        (review) =>
+          `${review.metadata.publisherName}\u0000${review.metadata.identifier}` === uniqueKey,
+      )
+    ) {
+      continue;
+    }
+
+    let payload: unknown;
+    try {
+      payload = await fetchQdnResourceData({
+        service: SUBMISSION_QDN_SERVICE,
+        name: metadata.publisherName,
+        identifier: metadata.identifier,
+      });
+    } catch (fetchError) {
+      if (isMissingResourceError(fetchError)) {
+        nextDiagnostics.push(
+          diagnostic('RESOURCE_NOT_FOUND', identifier, 'Submission resource was not found.'),
+        );
+      } else {
+        nextDiagnostics.push(
+          diagnostic(
+            'RESOURCE_UNAVAILABLE',
+            identifier,
+            `Submission resource could not be fetched: ${
+              fetchError instanceof Error ? fetchError.message : 'unknown error'
+            }`,
+          ),
+        );
+        nextIncomplete = true;
+      }
+
+      continue;
+    }
+
+    const submission = deserializeSubmissionFromQdn(payload);
+
+    if (!submission) {
+      nextDiagnostics.push(
+        diagnostic('MALFORMED_RESOURCE', identifier, 'Invalid listener track submission resource.'),
+      );
+      continue;
+    }
+
+    const structural = validateSubmissionStructuralIntegrity(
+      submission,
+      metadata.publisherName,
+      metadata.identifier,
+    );
+
+    if (!structural.ok) {
+      nextDiagnostics.push(diagnostic(structural.code, identifier, structural.detail));
+      continue;
+    }
+
+    const normalizedName = normalizeSubmissionName(submission.submitterName);
+    if (!walletByName.has(normalizedName)) {
+      try {
+        walletByName.set(normalizedName, await resolveNameWalletAddress(submission.submitterName));
+      } catch {
+        walletByName.set(normalizedName, null);
+      }
+    }
+
+    const resolvedAddress = walletByName.get(normalizedName);
+    if (
+      typeof resolvedAddress !== 'string' ||
+      normalizeWalletAddress(resolvedAddress) !==
+        normalizeWalletAddress(submission.submitterAddress)
+    ) {
+      nextDiagnostics.push(
+        diagnostic(
+          'IDENTITY_UNVERIFIED',
+          identifier,
+          'Submission submitterAddress does not match the verified Qortium name owner.',
+        ),
+      );
+      continue;
+    }
+
+    pendingReviews.push({ metadata, submission });
+  }
+
+  const nextReviews: ListenerSubmissionReview[] = [];
+
+  for (const pending of pendingReviews) {
+    const submission = pending.submission;
+    const moderationIdentifier = getSubmissionModerationQdnIdentifier(submission.submissionId);
+    let moderation: SubmissionModeration | null = null;
+    let status: SubmissionReviewStatus = 'PENDING';
+    let moderationError: string | undefined;
+
+    try {
+      const moderationPayload = await fetchQdnResourceData({
+        service: SUBMISSION_QDN_SERVICE,
+        name: stationPublisherName,
+        identifier: moderationIdentifier,
+      });
+      const parsedModeration = deserializeSubmissionModerationFromQdn(moderationPayload);
+
+      if (!parsedModeration) {
+        throw new Error('Invalid station moderation resource.');
+      }
+
+      const expectedSubmissionRef: QdnResourceRef = {
+        service: SUBMISSION_QDN_SERVICE,
+        name: pending.metadata.publisherName,
+        identifier: pending.metadata.identifier,
+      };
+
+      if (
+        parsedModeration.moderationId !== submission.submissionId ||
+        parsedModeration.submissionId !== submission.submissionId ||
+        parsedModeration.submissionRef.service !== expectedSubmissionRef.service ||
+        parsedModeration.submissionRef.name !== expectedSubmissionRef.name ||
+        parsedModeration.submissionRef.identifier !== expectedSubmissionRef.identifier ||
+        parsedModeration.moderatorAddress !== ownerAddress
+      ) {
+        throw new Error('Station moderation resource does not match this submission.');
+      }
+
+      if (
+        parsedModeration.decision === 'accepted' &&
+        parsedModeration.acceptedTrackId !== getAcceptedSubmissionTrackId(submission.submissionId)
+      ) {
+        throw new Error('Accepted moderation resource has an invalid acceptedTrackId.');
+      }
+
+      moderation = parsedModeration;
+      status = parsedModeration.decision === 'accepted' ? 'ACCEPTED' : 'REJECTED';
+    } catch (moderationFetchError) {
+      if (isMissingResourceError(moderationFetchError)) {
+        // No moderation resource yet is the normal PENDING state.
+        status = 'PENDING';
+      } else {
+        status = 'UNRESOLVED';
+        moderationError =
+          moderationFetchError instanceof Error
+            ? moderationFetchError.message
+            : 'Moderation state could not be resolved.';
+        nextDiagnostics.push(
+          diagnostic('MODERATION_UNAVAILABLE', moderationIdentifier, moderationError),
+        );
+        nextIncomplete = true;
+      }
+    }
+
+    nextReviews.push({
+      metadata: pending.metadata,
+      submission,
+      status,
+      moderation,
+      moderationError,
+    });
+  }
+
+  nextReviews.sort(
+    (left, right) =>
+      Date.parse(right.submission.submittedAt) - Date.parse(left.submission.submittedAt),
+  );
+
+  return {
+    reviews: nextReviews,
+    diagnostics: nextDiagnostics,
+    incomplete: nextIncomplete,
+  };
+}
+
+export async function loadListenerSubmissions(
+  stationPublisherName: string,
+  ownerAddress: string,
+  force = false,
+): Promise<void> {
+  const trimmedPublisherName = stationPublisherName.trim();
+  const trimmedOwnerAddress = ownerAddress.trim();
+  const nextScope = `${trimmedPublisherName}\u0000${trimmedOwnerAddress}`;
+
+  if (!force) {
+    if (loaded && scope === nextScope) {
+      return;
+    }
+
+    if (loading && scope === nextScope) {
+      return loadPromise ?? Promise.resolve();
+    }
+  }
+
+  const sameScope = scope === nextScope;
+  const hasVisibleState = loaded || reviews.length > 0 || diagnostics.length > 0;
+  const preserveVisibleState = force && sameScope && hasVisibleState;
+
+  // Every newly started load invalidates any prior in-flight load. This is
+  // deliberately not limited to force refreshes: a scope change must also
+  // stop an older account's async response from being applied later.
+  epoch += 1;
+  const currentEpoch = epoch;
+  loadPromise = null;
+
+  scope = nextScope;
+  loading = true;
+  error = null;
+
+  if (!preserveVisibleState) {
+    loaded = false;
+    reviews = [];
+    diagnostics = [];
+    incomplete = false;
+  }
+
+  notify();
+
+  if (!trimmedPublisherName || !trimmedOwnerAddress) {
+    loaded = true;
+    loading = false;
+    loadPromise = null;
+    notify();
+    return;
+  }
+
+  loadPromise = loadReviewRecordsInternal(trimmedPublisherName, trimmedOwnerAddress)
+    .then((snapshot) => {
+      if (currentEpoch === epoch && scope === nextScope) {
+        reviews = snapshot.reviews;
+        diagnostics = snapshot.diagnostics;
+        incomplete = snapshot.incomplete;
+        loaded = true;
+        error = null;
+      }
+    })
+    .catch((loadError) => {
+      if (currentEpoch === epoch && scope === nextScope) {
+        error =
+          loadError instanceof Error ? loadError.message : 'Failed to load listener submissions.';
+      }
+    })
+    .finally(() => {
+      if (currentEpoch === epoch && scope === nextScope) {
+        loading = false;
+        loadPromise = null;
+        notify();
+      }
+    });
+
+  return loadPromise;
+}
+
+export async function refreshListenerSubmissions(
+  stationPublisherName: string,
+  ownerAddress: string,
+): Promise<void> {
+  await loadListenerSubmissions(stationPublisherName, ownerAddress, true);
+}
+
+// ── Owner moderation ───────────────────────────────────────────────
+
+function assertOwner(actorAddress: string | null, ownerAddress: string): void {
+  if (!actorAddress || !ownerAddress || actorAddress !== ownerAddress) {
+    throw new Error('Only the station owner can moderate listener submissions.');
+  }
+}
+
+function submissionScopeKey(stationPublisherName: string, ownerAddress: string): string {
+  return `${stationPublisherName.trim()}\u0000${ownerAddress.trim()}`;
+}
+
+function publishModeration(
+  moderation: SubmissionModeration,
+  stationPublisherName: string,
+): Promise<Awaited<ReturnType<typeof publishResource>>> {
+  const identifier = getSubmissionModerationQdnIdentifier(moderation.submissionId);
+
+  return publishResource({
+    service: SUBMISSION_QDN_SERVICE,
+    name: stationPublisherName.trim(),
+    identifier,
+    bytesBase64: btoa(
+      unescape(encodeURIComponent(serializeSubmissionModerationForQdn(moderation))),
+    ),
+    fileName: qdnJsonPublishFileName(identifier),
+    mimeType: 'application/json',
+    title: `Listener submission ${moderation.decision}`,
+  });
+}
+
+function submissionModerationPublishResource(
+  moderation: SubmissionModeration,
+  stationPublisherName: string,
+): PublishMultipleResource {
+  const identifier = getSubmissionModerationQdnIdentifier(moderation.submissionId);
+
+  return {
+    service: SUBMISSION_QDN_SERVICE,
+    name: stationPublisherName.trim(),
+    identifier,
+    bytesBase64: btoa(
+      unescape(encodeURIComponent(serializeSubmissionModerationForQdn(moderation))),
+    ),
+    fileName: qdnJsonPublishFileName(identifier),
+    mimeType: 'application/json',
+    title: `Listener submission ${moderation.decision}`,
+  };
+}
+
+export async function acceptSubmission(
+  review: ListenerSubmissionReview,
+  stationPublisherName: string,
+  actorAddress: string | null,
+  ownerAddress: string,
+): Promise<AcceptSubmissionResult> {
+  assertOwner(actorAddress, ownerAddress);
+  const moderationScope = submissionScopeKey(stationPublisherName, ownerAddress);
+
+  if (scope !== moderationScope) {
+    throw new Error('Listener uploads scope changed during moderation.');
+  }
+
+  if (review.status === 'UNRESOLVED') {
+    throw new Error(
+      'Moderation state could not be resolved. Retry discovery before accepting this submission.',
+    );
+  }
+
+  const submission = review.submission;
+  const trackId = getAcceptedSubmissionTrackId(submission.submissionId);
+
+  if (
+    review.status === 'ACCEPTED' &&
+    review.moderation &&
+    review.moderation.acceptedTrackId === trackId
+  ) {
+    const existingTrack = getTrackById(trackId);
+    if (!existingTrack) {
+      throw new Error('Accepted submission track is missing from the loaded station library.');
+    }
+
+    return {
+      status: 'already-accepted',
+      track: existingTrack,
+      moderation: review.moderation,
+    };
+  }
+
+  const submissionRef: QdnResourceRef = {
+    service: SUBMISSION_QDN_SERVICE,
+    name: review.metadata.publisherName,
+    identifier: review.metadata.identifier,
+  };
+
+  const track = createTrack({
+    trackId,
+    title: submission.title,
+    artist: submission.artist,
+    album: submission.album,
+    releaseDate: submission.releaseDate,
+    description: submission.description,
+    audio: submission.audio,
+    cover: submission.cover,
+    durationMs: submission.durationMs,
+    genres: submission.genres,
+    tags: submission.tags,
+    source: 'qdn-existing',
+    ownerAddress,
+    submissionId: submission.submissionId,
+    submissionRef,
+  });
+
+  const moderation = createSubmissionModeration({
+    moderationId: submission.submissionId,
+    submissionId: submission.submissionId,
+    submissionRef,
+    decision: 'accepted',
+    acceptedTrackId: trackId,
+    moderatorAddress: ownerAddress,
+  });
+
+  const resources: PublishMultipleResource[] = [];
+  const trackAlreadyPresent = Boolean(getTrackById(track.trackId));
+  const trackResource = trackPublishResource(track, stationPublisherName.trim());
+  const trackIdentifier = trackResource.identifier;
+
+  if (!trackAlreadyPresent) {
+    resources.push(trackResource);
+  }
+  resources.push(submissionModerationPublishResource(moderation, stationPublisherName));
+
+  try {
+    const response = await publishMultipleResources(resources);
+    const moderationIdentifier = getSubmissionModerationQdnIdentifier(moderation.submissionId);
+    const moderationPublished = response.accepted
+      ? response.published.some((entry) => entry.resource.identifier === moderationIdentifier)
+      : false;
+    const trackPublished = trackAlreadyPresent
+      ? true
+      : response.accepted
+        ? response.published.some((entry) => entry.resource.identifier === trackIdentifier)
+        : false;
+
+    if (!trackPublished) {
+      const trackFailure = response.failures.find(
+        (entry) => entry.resource.identifier === trackIdentifier,
+      );
+      throw new Error(
+        `Failed to publish accepted Station Track: ${
+          trackFailure?.error ?? 'QDN batch publication returned no result for the track.'
+        }`,
+      );
+    }
+
+    if (!moderationPublished) {
+      const moderationFailure = response.failures.find(
+        (entry) => entry.resource.identifier === moderationIdentifier,
+      );
+      throw new SubmissionModerationWriteError(
+        `Station Track was published, but moderation publication failed: ${
+          moderationFailure?.error ??
+          'QDN batch publication returned no result for the moderation record.'
+        }`,
+        track,
+      );
+    }
+  } catch (moderationError) {
+    if (moderationError instanceof SubmissionModerationWriteError) {
+      throw moderationError;
+    }
+
+    throw new Error(
+      `Failed to publish accepted Station Track: ${
+        moderationError instanceof Error ? moderationError.message : 'Unknown error'
+      }`,
+    );
+  }
+
+  upsertTrackLocally(track);
+
+  if (scope === moderationScope) {
+    reviews = reviews.map((entry) =>
+      entry.metadata.identifier === review.metadata.identifier &&
+      entry.metadata.publisherName === review.metadata.publisherName
+        ? { ...entry, status: 'ACCEPTED', moderation, moderationError: undefined }
+        : entry,
+    );
+    notify();
+  }
+
+  return { status: 'accepted', track, moderation };
+}
+
+export async function rejectSubmission(
+  review: ListenerSubmissionReview,
+  stationPublisherName: string,
+  actorAddress: string | null,
+  ownerAddress: string,
+  reason?: string,
+): Promise<SubmissionModeration> {
+  assertOwner(actorAddress, ownerAddress);
+  const moderationScope = submissionScopeKey(stationPublisherName, ownerAddress);
+
+  if (scope !== moderationScope) {
+    throw new Error('Listener uploads scope changed during moderation.');
+  }
+
+  if (review.status === 'UNRESOLVED') {
+    throw new Error(
+      'Moderation state could not be resolved. Retry discovery before rejecting this submission.',
+    );
+  }
+
+  if (review.status === 'ACCEPTED') {
+    throw new Error(
+      'Accepted submissions cannot be rejected without first removing the Station Track.',
+    );
+  }
+
+  const submission = review.submission;
+  const moderation = createSubmissionModeration({
+    moderationId: submission.submissionId,
+    submissionId: submission.submissionId,
+    submissionRef: {
+      service: SUBMISSION_QDN_SERVICE,
+      name: review.metadata.publisherName,
+      identifier: review.metadata.identifier,
+    },
+    decision: 'rejected' satisfies SubmissionModerationDecision,
+    reason,
+    moderatorAddress: ownerAddress,
+  });
+
+  await publishModeration(moderation, stationPublisherName);
+
+  if (scope === moderationScope) {
+    reviews = reviews.map((entry) =>
+      entry.metadata.identifier === review.metadata.identifier &&
+      entry.metadata.publisherName === review.metadata.publisherName
+        ? { ...entry, status: 'REJECTED', moderation, moderationError: undefined }
+        : entry,
+    );
+    notify();
+  }
+
+  return moderation;
+}
+
+export function resetListenerSubmissionStore(): void {
+  epoch += 1;
+  reviews = [];
+  diagnostics = [];
+  loaded = false;
+  loading = false;
+  error = null;
+  incomplete = false;
+  scope = null;
+  loadPromise = null;
+  notify();
+}
