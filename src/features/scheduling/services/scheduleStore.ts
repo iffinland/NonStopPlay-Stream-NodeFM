@@ -43,9 +43,16 @@ import {
   type EditScheduleRecurrenceInput,
   type ScheduleConflict,
 } from './scheduleService';
-import { compileScheduleRecurrence } from './recurrenceCompiler';
+import { compileScheduleRecurrence, recurrencePeriodEnd } from './recurrenceCompiler';
+import { formatZonedDateInput } from './timezone';
 import { parseUtcTimestampMs } from './scheduleService';
+import { hasStationAccess } from '../../../qortium/stationAccess';
 import { mapWithConcurrency } from '../../../utils/mapConcurrent';
+import {
+  generateRequestShowOccurrence,
+  getRequestShowOccurrenceQdnIdentifier,
+} from '../../dynamic-programs/request-show/requestShowService';
+import { acceptPublishedRequestShowOccurrences } from '../../dynamic-programs/request-show/requestShowStore';
 
 type ScheduleListener = () => void;
 
@@ -991,6 +998,37 @@ export async function deleteScheduleRecurrenceAction(
   }
 
   const futureEvents = futureEventsForRecurrence(recurrenceId, nowUtcMs);
+  if (hasStationAccess()) {
+    const epoch = scheduleEpoch;
+    await publishCompleteProgram([
+      ...futureEvents.map((event) => ({
+        service: SCHEDULE_QDN_SERVICE,
+        name: ownerName,
+        identifier: getScheduleEventQdnIdentifier(event.eventId),
+        remove: true as const,
+      })),
+      {
+        service: SCHEDULE_QDN_SERVICE,
+        name: ownerName,
+        identifier: getScheduleRecurrenceQdnIdentifier(recurrenceId),
+        remove: true,
+      },
+    ]);
+    if (epoch !== scheduleEpoch)
+      throw new Error('The station changed. Refresh to check the removal result.');
+    const ids = new Set(futureEvents.map((event) => event.eventId));
+    scheduleRecurrences = scheduleRecurrences.filter((item) => item.recurrenceId !== recurrenceId);
+    scheduleEvents = scheduleEvents.filter((event) => !ids.has(event.eventId));
+    notify();
+    return {
+      recurrenceId,
+      status: 'deleted',
+      deletedEventIds: [...ids],
+      remainingEventIds: [],
+      failures: [],
+    };
+  }
+
   const deletedEventIds: string[] = [];
   const failures: ScheduleDeleteFailure[] = [];
 
@@ -1062,4 +1100,156 @@ export async function deleteScheduleRecurrenceAction(
     remainingEventIds: [],
     failures: [],
   };
+}
+
+/** All data for one program action is prepared before its single Hub approval. */
+export type RequestShowPublication = {
+  definition: import('../../../types/domain').DynamicProgramDefinition;
+  tracks: readonly import('../../../types/domain').Track[];
+  ranking: readonly import('../../likes/services/likeService').RankedLikedTrack[];
+};
+
+function plannedLineups(
+  events: readonly ScheduleEvent[],
+  ownerName: string,
+  requestShow?: RequestShowPublication,
+) {
+  if (!requestShow) {
+    if (events.some((event) => event.source.type === 'dynamic-program'))
+      throw new Error('Request Show data must be ready before publishing the program.');
+    return {
+      occurrences: [] as import('../../../types/domain').DynamicProgramOccurrence[],
+      resources: [] as PublishMultipleResource[],
+    };
+  }
+  const occurrences = events.map((event) => {
+    if (
+      event.source.type !== 'dynamic-program' ||
+      event.source.programDefinitionId !== requestShow.definition.programDefinitionId
+    )
+      throw new Error('Request Show definition does not match the program.');
+    const result = generateRequestShowOccurrence(
+      event,
+      requestShow.definition,
+      requestShow.tracks,
+      requestShow.ranking,
+      new Date().toISOString(),
+    );
+    if (!result.ok) throw new Error(result.message);
+    return result.occurrence;
+  });
+  const resources = occurrences.map((occurrence) => ({
+    service: 'JSON',
+    name: ownerName,
+    identifier: getRequestShowOccurrenceQdnIdentifier(occurrence.scheduleEventId),
+    bytesBase64: btoa(unescape(encodeURIComponent(JSON.stringify(occurrence)))),
+    fileName: 'request-show-lineup.json',
+    title: 'Request Show lineup',
+  }));
+  return { occurrences, resources };
+}
+
+async function publishCompleteProgram(resources: PublishMultipleResource[]) {
+  const result = await publishMultipleResources(resources);
+  const failures = resources.filter(
+    (r) =>
+      !result.published.some(
+        (entry) =>
+          entry.resource.name === r.name &&
+          entry.resource.service === r.service &&
+          entry.resource.identifier === r.identifier &&
+          !!entry.transactionSignature,
+      ),
+  );
+  if (failures.length)
+    throw new Error(
+      `Program publication was not fully confirmed (${failures.length} of ${resources.length} records). ${result.failures[0]?.error ?? 'Check the saved schedule before publishing again.'}`,
+    );
+}
+
+export async function saveRecurringProgramAction(
+  input: CreateScheduleRecurrenceInput,
+  ownerName: string,
+  nowUtcMs: number,
+  existingId?: string,
+  requestShow?: RequestShowPublication,
+): Promise<ScheduleRecurrence> {
+  const epoch = scheduleEpoch;
+  const previous = existingId
+    ? scheduleRecurrences.find((r) => r.recurrenceId === existingId)
+    : undefined;
+  if (existingId && !previous)
+    throw new Error('Recurring program is no longer available. Refresh the schedule.');
+  const recurrence = previous
+    ? editScheduleRecurrence(previous, input)
+    : createScheduleRecurrence(input);
+  if (!recurrence.activeUntilLocalDate) {
+    const today = formatZonedDateInput(nowUtcMs, recurrence.timezone);
+    recurrence.activeUntilLocalDate = recurrencePeriodEnd(
+      recurrence.activeFromLocalDate > today ? recurrence.activeFromLocalDate : today,
+    );
+  }
+  const targets = assertRecurrenceReconcileSafe(recurrence, nowUtcMs);
+  if (!targets.length)
+    throw new Error('This period contains no future programs. Choose a later date.');
+  const targetIds = new Set(targets.map((event) => event.eventId));
+  const obsolete = previous
+    ? futureEventsForRecurrence(previous.recurrenceId, nowUtcMs).filter(
+        (event) => !targetIds.has(event.eventId),
+      )
+    : [];
+  const lineups = plannedLineups(targets, ownerName, requestShow);
+  const resources: PublishMultipleResource[] = [
+    scheduleRecurrencePublishResource(recurrence, ownerName),
+    ...targets.map((event) => scheduleEventPublishResource(event, ownerName)),
+    ...lineups.resources,
+    ...obsolete.map((event) => ({
+      service: 'JSON',
+      name: ownerName,
+      identifier: getScheduleEventQdnIdentifier(event.eventId),
+      remove: true as const,
+    })),
+  ];
+  await publishCompleteProgram(resources);
+  if (scheduleEpoch !== epoch)
+    throw new Error('The station changed during publication. Refresh to check its result.');
+  scheduleRecurrences = [
+    ...scheduleRecurrences.filter((r) => r.recurrenceId !== recurrence.recurrenceId),
+    recurrence,
+  ];
+  replaceFutureRecurrenceEvents(recurrence.recurrenceId, nowUtcMs, targets);
+  acceptPublishedRequestShowOccurrences(lineups.occurrences);
+  notify();
+  return recurrence;
+}
+
+export async function saveScheduledProgramAction(
+  input: CreateScheduleEventInput,
+  ownerName: string,
+  existingId?: string,
+  requestShow?: RequestShowPublication,
+): Promise<ScheduleEvent> {
+  const epoch = scheduleEpoch;
+  const previous = existingId
+    ? scheduleEvents.find((event) => event.eventId === existingId)
+    : undefined;
+  if (existingId && !previous)
+    throw new Error('Program is no longer available. Refresh the schedule.');
+  const event = previous ? editScheduleEvent(previous, input) : createScheduleEvent(input);
+  const conflicts = assertNoConflicts(event, existingId);
+  if (conflicts.length) throw new ScheduleConflictError(conflicts);
+  const lineups = plannedLineups([event], ownerName, requestShow);
+  await publishCompleteProgram([
+    scheduleEventPublishResource(event, ownerName),
+    ...lineups.resources,
+  ]);
+  if (scheduleEpoch !== epoch)
+    throw new Error('The station changed during publication. Refresh to check its result.');
+  scheduleEvents = [
+    ...scheduleEvents.filter((candidate) => candidate.eventId !== event.eventId),
+    event,
+  ];
+  acceptPublishedRequestShowOccurrences(lineups.occurrences);
+  notify();
+  return event;
 }

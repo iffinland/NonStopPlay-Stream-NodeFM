@@ -48,7 +48,7 @@ export function ShareModal({ target, onClose }: Props) {
       const didCopy = await copyShareTarget(shareTarget);
 
       if (!didCopy) {
-        throw new Error('Clipboard copy failed in this Qortium view.');
+        throw new Error('Clipboard copy failed in this Qortal view.');
       }
 
       setCopied(true);

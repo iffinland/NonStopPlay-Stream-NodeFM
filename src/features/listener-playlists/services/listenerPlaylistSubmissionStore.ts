@@ -1,3 +1,4 @@
+import { assertStationManager } from '../../collaboration/collaborationService';
 /* ============================================================
  * NodeFM Station — Listener Playlist Submission Store
  *
@@ -370,10 +371,8 @@ export async function loadListenerPlaylistSubmissions(
   return loadPromise;
 }
 
-function assertOwner(actorAddress: string | null, ownerAddress: string): void {
-  if (!actorAddress || !ownerAddress || actorAddress !== ownerAddress) {
-    throw new Error('Only the station owner can moderate playlist submissions.');
-  }
+async function assertOwner(actorAddress: string | null, ownerAddress: string): Promise<void> {
+  await assertStationManager(actorAddress, ownerAddress);
 }
 
 async function loadExactListenerVersion(
@@ -529,7 +528,7 @@ export async function acceptListenerPlaylistSubmission(
   version: PlaylistVersion;
   moderation: SubmissionModerationType;
 }> {
-  assertOwner(actorAddress, ownerAddress);
+  await assertOwner(actorAddress, ownerAddress);
 
   if (scope !== scopeKey(stationPublisherName, ownerAddress)) {
     throw new Error('Playlist submissions scope changed during moderation.');
@@ -675,7 +674,7 @@ export async function rejectListenerPlaylistSubmission(
   ownerAddress: string,
   reason?: string,
 ): Promise<SubmissionModerationType> {
-  assertOwner(actorAddress, ownerAddress);
+  await assertOwner(actorAddress, ownerAddress);
 
   if (scope !== scopeKey(stationPublisherName, ownerAddress)) {
     throw new Error('Playlist submissions scope changed during moderation.');

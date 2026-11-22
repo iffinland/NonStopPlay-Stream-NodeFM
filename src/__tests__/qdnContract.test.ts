@@ -292,6 +292,7 @@ describe('SEARCH_QDN_RESOURCES request shape', () => {
       action: 'SEARCH_QDN_RESOURCES',
       mode: 'ALL',
       limit: 500,
+      exactMatchNames: true,
       service: 'JSON',
       name: 'Owner',
       query: 'nodefm-track-',

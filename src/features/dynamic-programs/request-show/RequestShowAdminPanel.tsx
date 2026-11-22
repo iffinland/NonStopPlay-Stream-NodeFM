@@ -110,7 +110,7 @@ export function RequestShowAdminPanel({ events }: RequestShowAdminPanelProps) {
 
   const handleSaveDefinition = async () => {
     if (!publisherName) {
-      setFormError('A registered Qortium name is required.');
+      setFormError('A registered Qortal name is required.');
       return;
     }
 
@@ -151,7 +151,7 @@ export function RequestShowAdminPanel({ events }: RequestShowAdminPanelProps) {
 
   const handleMaterializeMissing = async () => {
     if (!publisherName) {
-      setFormError('A registered Qortium name is required.');
+      setFormError('A registered Qortal name is required.');
       return;
     }
 

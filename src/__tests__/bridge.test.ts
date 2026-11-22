@@ -14,12 +14,11 @@ afterEach(() => {
 });
 
 describe('Qortal bridge transport', () => {
-  it('rejects unported Home, social and background actions before sending any request', async () => {
+  it('rejects unported Home and background actions before sending any request', async () => {
     const request = vi.fn();
     vi.stubGlobal('window', { qortalRequest: request });
     for (const action of [
       'STAGE_QDN_PUBLISH_SOURCE',
-      'SEND_COIN',
       'GET_SELECTED_ACCOUNT',
       'SET_QDN_BACKGROUND_AUDIO_QUEUE',
     ]) {

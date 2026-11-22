@@ -32,6 +32,7 @@ export function Layout() {
   const { auth, refresh: connect, disconnect } = useAuth();
   const {
     isOwner,
+    canManage,
     station,
     ownerLookupLoading,
     ownerLookupError,
@@ -87,7 +88,7 @@ export function Layout() {
               {label}
             </Link>
           ))}
-          {isOwner && (
+          {(canManage ?? isOwner) && (
             <Link
               to="/admin"
               className={`layout__nav-link${location.pathname.startsWith('/admin') ? ' layout__nav-link--active' : ''}`}

@@ -1,6 +1,7 @@
 /** Qortal Core's injected Q-App transport. Kept at the existing import boundary. */
 import { isConfirmedQdnNotFoundError } from './qdnReadError';
 import { beginStartupRequest } from '../services/perf/startupDiagnostics';
+import { stationRequest } from './stationAccess';
 
 type RequestPayload = Record<string, unknown>;
 type RequestFunction = (payload: RequestPayload) => Promise<unknown> | unknown;
@@ -130,6 +131,8 @@ const SUPPORTED_ACTIONS = new Set([
   'OPEN_NEW_TAB',
   'PUBLISH_QDN_RESOURCE',
   'PUBLISH_MULTIPLE_QDN_RESOURCES',
+  'SEND_CHAT_MESSAGE',
+  'SEND_COIN',
 ]);
 
 function sleep(durationMs: number): Promise<void> {
@@ -279,6 +282,14 @@ function toRequestError(value: unknown, action: string): Error {
 
 /** Call Core's actual injected request function; retry only safe reads. */
 export async function sendBridgeRequest<T = unknown>(request: Record<string, unknown>): Promise<T> {
+  const result = await stationRequest(request);
+  if (result.handled) return result.value as T;
+  return sendBridgeRequestRaw<T>(request);
+}
+
+export async function sendBridgeRequestRaw<T = unknown>(
+  request: Record<string, unknown>,
+): Promise<T> {
   const action = typeof request.action === 'string' ? request.action : 'UNKNOWN_ACTION';
   if (!SUPPORTED_ACTIONS.has(action)) {
     throw new QortalBridgeError(

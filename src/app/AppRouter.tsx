@@ -29,6 +29,7 @@ const AboutPage = lazy(() => import('../pages/AboutPage'));
 // ── Admin Pages ───────────────────────────────────────────────────
 
 const AdminDashboard = lazy(() => import('../pages/admin/AdminDashboard'));
+const ManageAdminsPage = lazy(() => import('../pages/admin/ManageAdminsPage'));
 const LibraryPage = lazy(() => import('../pages/admin/LibraryPage'));
 const PlaylistsAdminPage = lazy(() => import('../pages/admin/PlaylistsAdminPage'));
 const PlaylistEditorPage = lazy(() => import('../pages/admin/PlaylistEditorPage'));
@@ -49,13 +50,13 @@ function PageLoader() {
 
 function AdminGuard({ children }: { children: React.ReactNode }) {
   const { auth } = useAuth();
-  const { isOwner, ownerLookupLoading } = useStation();
+  const { isOwner, canManage, ownerLookupLoading } = useStation();
 
   if (auth.status === 'loading' || ownerLookupLoading) {
     return <LoadingState message="Checking authorization…" />;
   }
 
-  if (!isOwner) {
+  if (!(canManage ?? isOwner)) {
     return <Navigate to="/" replace />;
   }
 
@@ -84,7 +85,7 @@ export function AppRouter() {
             <Route path="about" element={<AboutPage />} />
           </Route>
 
-          {/* ── Admin Routes (owner only) ── */}
+          {/* ── Admin Routes (owner or authorized collaborator) ── */}
           <Route
             path="admin"
             element={
@@ -94,6 +95,7 @@ export function AppRouter() {
             }
           >
             <Route index element={<AdminDashboard />} />
+            <Route path="admins" element={<ManageAdminsPage />} />
             <Route path="library" element={<LibraryPage />} />
             <Route path="playlists" element={<PlaylistsAdminPage />} />
             <Route path="playlists/:playlistId" element={<PlaylistEditorPage />} />

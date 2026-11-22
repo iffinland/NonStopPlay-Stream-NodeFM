@@ -108,7 +108,7 @@ export function useRequestShow(): UseRequestShowResult {
 
   const throwIfNoName = useCallback(() => {
     if (!publisherName) {
-      throw new Error('A registered Qortium name is required.');
+      throw new Error('A registered Qortal name is required.');
     }
   }, [publisherName]);
 

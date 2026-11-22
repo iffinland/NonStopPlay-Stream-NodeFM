@@ -136,11 +136,11 @@ describe('one-action bulk publication', () => {
       ).ok,
     ).toBe(false);
   });
-  it('publishes three tracks and covers in two approvals and creates discoverable listener submissions', async () => {
+  it('publishes three tracks and covers in one approval and creates discoverable listener submissions', async () => {
     const s = setup();
     await publishBulkSelection(s.options);
-    expect(s.requests.map((r) => r.length)).toEqual([6, 3]);
-    for (const input of s.requests[1]) {
+    expect(s.requests.map((r) => r.length)).toEqual([9]);
+    for (const input of s.requests[0].filter((resource) => resource.service === 'JSON')) {
       const submission = deserializeSubmissionFromQdn(JSON.parse(atob(input.bytesBase64!)))!;
       expect(submission).toBeTruthy();
       expect(validateSubmissionStructuralIntegrity(submission, 'Owner', input.identifier!)).toEqual(
@@ -156,12 +156,12 @@ describe('one-action bulk publication', () => {
       'complete',
     ]);
     await publishBulkSelection(s.options);
-    expect(s.publish).toHaveBeenCalledTimes(2);
+    expect(s.publish).toHaveBeenCalledTimes(1);
   });
   it('updates the admin library only after canonical track metadata is confirmed', async () => {
     const s = setup('admin', 2, false);
     await publishBulkSelection(s.options);
-    expect(s.requests.map((r) => r.length)).toEqual([2, 2]);
+    expect(s.requests.map((r) => r.length)).toEqual([4]);
     expect(s.options.onTrack).toHaveBeenCalledTimes(2);
     expect(s.options.onTrack).toHaveBeenCalledWith(
       expect.objectContaining({ trackId: 'row-0', title: 'Song 0', durationMs: 1000 }),
@@ -212,7 +212,7 @@ describe('one-action bulk publication', () => {
     expect(s.batch().rows[0].publication.audio.status).toBe('failed');
     await publishBulkSelection(s.options);
     expect(s.batch().rows.map(getBulkImportPublicationStatus)).toEqual(['complete']);
-    expect(s.publish).toHaveBeenCalledTimes(3);
+    expect(s.publish).toHaveBeenCalledTimes(2);
   });
   it('stops after account approval if the workspace changed', async () => {
     const s = setup();
@@ -225,10 +225,38 @@ describe('one-action bulk publication', () => {
     await expect(publishBulkSelection(s.options)).rejects.toThrow(/workspace changed/);
     expect(s.publish).not.toHaveBeenCalled();
   });
-  it('splits a larger selection into bounded batches and waits for media before metadata', async () => {
+  it('prepares a larger selection in one batch with media ordered before metadata', async () => {
     const s = setup('admin', 12, false);
     await publishBulkSelection(s.options);
-    expect(s.requests.map((r) => r.length)).toEqual([10, 2, 10, 2]);
-    expect(s.requests.map((r) => r[0].service)).toEqual(['AUDIO', 'AUDIO', 'JSON', 'JSON']);
+    expect(s.requests.map((r) => r.length)).toEqual([24]);
+    expect(s.requests[0].map((r) => r.service)).toEqual([
+      ...Array(12).fill('AUDIO'),
+      ...Array(12).fill('JSON'),
+    ]);
   });
+});
+
+it('does not add a station track when metadata is signed but its media is unconfirmed', async () => {
+  const s = setup('admin', 1, false);
+  s.publish.mockImplementationOnce(async (resources) => ({
+    accepted: true,
+    action: 'PUBLISH_MULTIPLE_QDN_RESOURCES',
+    published: resources
+      .filter((r) => r.service === 'JSON')
+      .map((r) => ({
+        resource: { service: r.service, name: r.name, identifier: r.identifier! },
+        transactionSignature: 'metadata-sig',
+        result: {},
+      })),
+    failures: resources
+      .filter((r) => r.service === 'AUDIO')
+      .map((r) => ({
+        resource: { service: r.service, name: r.name, identifier: r.identifier! },
+        error: 'Audio outcome unknown',
+        outcome: 'unknown' as const,
+      })),
+  }));
+  await expect(publishBulkSelection(s.options)).rejects.toThrow(/not confirmed/);
+  expect(s.options.onTrack).not.toHaveBeenCalled();
+  expect(getBulkImportPublicationStatus(s.batch().rows[0])).not.toBe('complete');
 });

@@ -20,7 +20,7 @@ export { ScheduleConflictError } from './services/scheduleStore';
 export {
   compileScheduleRecurrence,
   getDeterministicOccurrenceEventId,
-  DEFAULT_RECURRENCE_HORIZON_DAYS,
+  DEFAULT_RECURRENCE_MONTHS,
 } from './services/recurrenceCompiler';
 export {
   requireUnambiguousZonedUtcMs,

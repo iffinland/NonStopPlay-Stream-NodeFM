@@ -1,6 +1,7 @@
 /** Qortal owns account access, signing and approval dialogs. Never handle passwords. */
 import { sendBridgeRequest } from './bridge';
 import { getResolvedAccountAddress } from './auth';
+import { authorizeStationName } from './stationAccess';
 
 export type AccountWriteTicket = { address: string; name?: string };
 export type AccountWriteReadiness = { status: 'ready'; address: string } | { status: 'no-account' };
@@ -38,6 +39,7 @@ export async function assertPublisherOwner(
   name: string,
   ticket: AccountWriteTicket,
 ): Promise<void> {
+  if (await authorizeStationName(name, ticket.address)) return;
   const value = await sendBridgeRequest<unknown>({ action: 'GET_NAME_DATA', name });
   if (
     !value ||

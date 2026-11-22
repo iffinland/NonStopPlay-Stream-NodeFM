@@ -242,7 +242,7 @@ export function getTrackStatus(track: Track): TrackStatus {
 // ── Track Identity for QDN ──────────────────────────────────────────
 //
 // QDN resource identity lives in the `identifier` field.
-// The `name` field is the publisher's registered Qortium name.
+// The `name` field is the publisher's registered Qortal name.
 
 /** Generate a QDN identifier for a track metadata resource. */
 export function getTrackQdnIdentifier(trackId: string): string {

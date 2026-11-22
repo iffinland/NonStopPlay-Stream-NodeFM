@@ -62,7 +62,7 @@ export default function ListenerPlaylistDetailPage() {
 
     if (!ownerName || !stationPublisherName || !playlistId) {
       setLoading(false);
-      setError('A registered Qortium name and station publisher are required.');
+      setError('A registered Qortal name and station publisher are required.');
       return;
     }
 

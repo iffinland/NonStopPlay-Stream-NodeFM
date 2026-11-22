@@ -116,7 +116,7 @@ export function useListenerSubmissions(): UseListenerSubmissionsResult {
   const accept = useCallback(
     (review: ListenerSubmissionReview) => {
       if (!ownerAddress || !publisherName) {
-        return Promise.reject(new Error('A registered Qortium name is required.'));
+        return Promise.reject(new Error('A registered Qortal name is required.'));
       }
 
       return acceptSubmission(review, publisherName, actorAddress, ownerAddress);
@@ -127,7 +127,7 @@ export function useListenerSubmissions(): UseListenerSubmissionsResult {
   const reject = useCallback(
     (review: ListenerSubmissionReview, reason?: string) => {
       if (!ownerAddress || !publisherName) {
-        return Promise.reject(new Error('A registered Qortium name is required.'));
+        return Promise.reject(new Error('A registered Qortal name is required.'));
       }
 
       return rejectSubmission(review, publisherName, actorAddress, ownerAddress, reason);

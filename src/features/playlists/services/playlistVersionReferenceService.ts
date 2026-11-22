@@ -17,6 +17,7 @@ import type {
   Station,
 } from '../../../types/domain';
 import { fetchQdnResourceData, searchQdnResources } from '../../../qortium/qdn';
+import { isConfirmedQdnNotFoundError } from '../../../qortium/qdnReadError';
 import {
   deserializePlaylistFromQdn,
   getPlaylistQdnIdentifier,
@@ -149,10 +150,7 @@ export function findPlaylistVersionReferences(args: {
 }
 
 function isMissingResourceError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    /does not exist|not found|not published|unavailable|empty payload/i.test(error.message)
-  );
+  return isConfirmedQdnNotFoundError(error);
 }
 
 async function discoverIdentifiers(

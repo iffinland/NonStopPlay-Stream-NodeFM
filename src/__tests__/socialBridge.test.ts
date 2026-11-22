@@ -2,7 +2,7 @@
  * NodeFM Station — Social Bridge Contract Tests
  *
  * Verifies direct chat, native tip, and navigation bridge shapes
- * against the current Qortium Home implementation.
+ * against the audited Qortal Hub implementation.
  * ============================================================ */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,12 +26,10 @@ describe('SEND_CHAT_MESSAGE direct bridge path', () => {
   it('sends the exact direct-recipient request and returns confirmed result', async () => {
     mockedSend.mockImplementation(
       withUnlockedTestAccount(async () => ({
-        accepted: true,
-        action: 'SEND_CHAT_MESSAGE',
-        direct: true,
-        encrypted: true,
-        recipientAddress: 'Q-owner',
-        result: { signature: 'tx-1' },
+        type: 'CHAT',
+        signature: 'tx-1',
+        recipient: 'Q-owner',
+        isEncrypted: true,
       })),
     );
 
@@ -42,7 +40,7 @@ describe('SEND_CHAT_MESSAGE direct bridge path', () => {
 
     expect(mockedSend).toHaveBeenCalledWith({
       action: 'SEND_CHAT_MESSAGE',
-      recipientAddress: 'Q-owner',
+      destinationAddress: 'Q-owner',
       message: 'Hello station',
     });
     expect(result.accepted).toBe(true);
@@ -60,26 +58,21 @@ describe('SEND_CHAT_MESSAGE direct bridge path', () => {
 
     await expect(
       sendDirectChatMessage({ recipientAddress: 'Q-owner', message: 'Hello' }),
-    ).rejects.toThrow(/USER_CANCELLED/);
+    ).rejects.toThrow(/confirmed transaction signature/);
   });
 
   it('does not claim encryption unless the bridge proves it', async () => {
     mockedSend.mockImplementation(
       withUnlockedTestAccount(async () => ({
-        accepted: true,
-        action: 'SEND_CHAT_MESSAGE',
-        direct: true,
-        encrypted: false,
-        recipientAddress: 'Q-owner',
+        signature: 'tx-plain',
+        recipient: 'Q-owner',
+        isEncrypted: false,
       })),
     );
 
-    const result = await sendDirectChatMessage({
-      recipientAddress: 'Q-owner',
-      message: 'Hello',
-    });
-
-    expect(result.encrypted).toBe(false);
+    await expect(
+      sendDirectChatMessage({ recipientAddress: 'Q-owner', message: 'Hello' }),
+    ).rejects.toThrow(/does not match/);
   });
 });
 
@@ -91,12 +84,10 @@ describe('SEND_COIN native tip bridge path', () => {
   it('sends the exact native tip request and parses a confirmed signature', async () => {
     mockedSend.mockImplementation(
       withUnlockedTestAccount(async () => ({
-        accepted: true,
-        action: 'SEND_COIN',
+        type: 'PAYMENT',
         recipient: 'Q-owner',
         amount: '1.25',
-        result: { signature: 'tip-tx' },
-        transactionSignature: 'tip-tx',
+        signature: 'tip-tx',
       })),
     );
 
@@ -104,6 +95,7 @@ describe('SEND_COIN native tip bridge path', () => {
 
     expect(mockedSend).toHaveBeenCalledWith({
       action: 'SEND_COIN',
+      coin: 'QORT',
       recipient: 'Q-owner',
       amount: '1.25',
     });
@@ -117,7 +109,7 @@ describe('SEND_COIN native tip bridge path', () => {
     );
 
     await expect(sendNativeTip({ recipient: 'Q-owner', amount: '1.25' })).rejects.toThrow(
-      /USER_CANCELLED/,
+      /confirmed transaction signature/,
     );
   });
 });

@@ -1,5 +1,26 @@
 # Architecture
 
+**Release acceptance, 2026-11-22:** the owner confirmed RC.9 runtime and all tests passed, and authorized main/tag/release publication. Earlier candidate/pending statements below describe their historical checkpoints and are superseded by the [accepted release](../reports/QORTAL-RC9-ACCEPTANCE.md).
+
+Current candidate: RC.8 adds [bounded periods and one-approval publication](QORTAL-BATCH-PUBLISHING.md), including single-document access changes. Native acceptance is pending.
+
+## Current Qortal boundary
+
+The sections below describe the imported Qortium architecture. Qortal transport,
+publication and ownership contracts supersede its platform assumptions; see the
+[port audit](QORTAL-PORT-AUDIT.md) and [phase 2](QORTAL-PHASE2.md).
+RC.6 adds an owner-authorized collaborator registry and per-writer QDN manifests
+at the bridge boundary. Existing station domain identity is preserved while real
+publications use the collaborator's own name/wallet. The complete data, merge,
+revocation and propagation contract is in [Qortal collaborators](QORTAL-COLLABORATORS.md).
+
+RC.7 uses this manifest boundary at epoch zero as well, including owner-only
+stations. Removal markers participate in revision ordering and owner checkpoints;
+all station reads exclude them. Station metadata uses DOCUMENT with explicit
+application bounds; personal JSON and the access registry retain Core limits.
+Legacy station indexes are paginated before merging. See
+[phases 3–4](QORTAL-PHASE3-4.md).
+
 ## 1. Architectural principles
 
 ### Qortium-native first

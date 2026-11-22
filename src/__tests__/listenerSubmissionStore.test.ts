@@ -151,7 +151,7 @@ describe('publishListenerSubmission', () => {
     }));
   });
 
-  it('publishes listener-owned audio first and only then submission metadata', async () => {
+  it('publishes listener-owned audio and submission metadata in one approval', async () => {
     mockedPublish.mockImplementation(async () => {
       return publishedResult('nodefm-track-submission-1', 'listener-a');
     });
@@ -183,9 +183,11 @@ describe('publishListenerSubmission', () => {
         }),
       ]),
     );
-    expect(mockedPublish).toHaveBeenCalledWith(
+    expect(mockedBatchPublish).toHaveBeenCalledTimes(1);
+    expect(mockedBatchPublish.mock.calls[0][0]).toContainEqual(
       expect.objectContaining({ service: 'JSON', name: LISTENER_A }),
     );
+    expect(mockedPublish).not.toHaveBeenCalled();
   });
 
   it('publishes an optional cover under the listener name', async () => {
@@ -249,9 +251,31 @@ describe('publishListenerSubmission', () => {
   });
 
   it('preserves a retryable submission draft when metadata publication fails', async () => {
-    mockedPublish.mockImplementation(async () => {
-      throw new Error('metadata rejected');
-    });
+    mockedBatchPublish.mockImplementation(async (resources) => ({
+      accepted: true,
+      action: 'PUBLISH_MULTIPLE_QDN_RESOURCES',
+      published: resources
+        .filter((resource) => resource.service === 'AUDIO')
+        .map((resource) => ({
+          resource: {
+            service: resource.service,
+            name: resource.name,
+            identifier: resource.identifier!,
+          },
+          result: {},
+          transactionSignature: 'audio-signature',
+        })),
+      failures: resources
+        .filter((resource) => resource.service === 'JSON')
+        .map((resource) => ({
+          resource: {
+            service: resource.service,
+            name: resource.name,
+            identifier: resource.identifier!,
+          },
+          error: 'metadata rejected',
+        })),
+    }));
 
     const result = await publishListenerSubmission({
       submissionId: SUBMISSION_ID,
@@ -270,7 +294,7 @@ describe('publishListenerSubmission', () => {
 
     expect(result.status).toBe('partial');
     expect(mockedBatchPublish).toHaveBeenCalledTimes(1);
-    expect(mockedPublish).toHaveBeenCalledTimes(1);
+    expect(mockedPublish).not.toHaveBeenCalled();
     if (result.status === 'partial') {
       expect(result.audio).toBeTruthy();
       expect(result.submissionDraft?.title).toBe('Retry Me');

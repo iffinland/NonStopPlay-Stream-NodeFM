@@ -1,0 +1,70 @@
+name: Publish accepted release
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/releases/*.json']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: accepted-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select the explicitly changed release descriptor
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess
+          before = os.environ['BEFORE']
+          files = subprocess.check_output(['git', 'diff', '--name-only', before, 'HEAD', '--', '.github/releases/*.json'], text=True).splitlines()
+          if len(files) != 1 or not pathlib.Path(files[0]).is_file():
+              raise SystemExit('Exactly one explicit accepted release descriptor is required.')
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('RELEASE_DESCRIPTOR=' + files[0] + '\n')
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test -- --maxWorkers=2
+      - run: npm run build
+      - run: npm run lint
+      - run: npm run format:check
+      - name: Package exact accepted runtime and release source
+        run: python3 scripts/package_release.py "$RELEASE_DESCRIPTOR" "$RUNNER_TEMP/nodefm-release"
+      - name: Create draft, attach verified assets, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          output = pathlib.Path(os.environ['RUNNER_TEMP']) / 'nodefm-release'
+          release = json.loads((output / 'release.json').read_text())
+          tag = release['tag']
+          found = subprocess.run(['gh', 'release', 'view', tag], capture_output=True)
+          if found.returncode == 0:
+              raise SystemExit('Release already exists; refusing to overwrite it automatically.')
+          assets = [output / ('NodeFM_' + release['version'] + '.zip'), output / ('NodeFM_' + release['version'] + '_release-source.zip'), output / 'SHA256SUMS']
+          command = ['gh', 'release', 'create', tag, '--draft', '--target', os.environ['GITHUB_SHA'], '--title', release['title'], '--notes-file', release['notes_path']]
+          if release['prerelease']:
+              command.append('--prerelease')
+          subprocess.run(command + [str(path) for path in assets], check=True)
+          result = json.loads(subprocess.check_output(['gh', 'release', 'view', tag, '--json', 'assets,isDraft'], text=True))
+          if not result['isDraft'] or {asset['name'] for asset in result['assets']} != {path.name for path in assets}:
+              raise SystemExit('Draft asset verification failed; leaving the release unpublished.')
+          subprocess.run(['gh', 'release', 'edit', tag, '--draft=false', '--latest'], check=True)
+          PY

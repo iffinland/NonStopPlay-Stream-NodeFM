@@ -74,7 +74,7 @@ describe('daily recurrence compilation', () => {
     expect(new Set(first.events.map((event) => event.eventId)).size).toBe(first.events.length);
   });
 
-  it('caps future generation at the configured 8-week horizon', () => {
+  it('defaults an open-ended recurrence to one calendar month', () => {
     const result = compileScheduleRecurrence(
       recurrence({ activeFromLocalDate: '2020-01-01' }),
       NOW,
@@ -82,7 +82,8 @@ describe('daily recurrence compilation', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.events.length).toBe(57);
+    expect(result.events.length).toBe(31);
+    expect(result.generatedDates[result.generatedDates.length - 1]).toBe('2026-02-14');
   });
 });
 
@@ -158,4 +159,22 @@ describe('deterministic occurrence identity', () => {
     expect(idA).toBe(idB);
     expect(idA).toMatch(/^nodefm-generated-event-/);
   });
+});
+
+it('compiles an explicit multi-month period in full instead of truncating it to eight weeks', () => {
+  const result = compileScheduleRecurrence(
+    recurrence({ activeFromLocalDate: '2026-01-15', activeUntilLocalDate: '2026-04-14' }),
+    NOW,
+  );
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(result.generatedDates).toHaveLength(90);
+  expect(result.generatedDates[result.generatedDates.length - 1]).toBe('2026-04-14');
+});
+it('rejects an unbounded custom period beyond twelve months', () => {
+  const result = compileScheduleRecurrence(
+    recurrence({ activeFromLocalDate: '2026-01-15', activeUntilLocalDate: '2028-01-15' }),
+    NOW,
+  );
+  expect(result.ok).toBe(false);
 });

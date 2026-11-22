@@ -3201,7 +3201,7 @@ select {
 
 .schedule-editor__time-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.75rem;
 }
 
@@ -4402,4 +4402,60 @@ select {
   vertical-align: -0.12em;
   margin-inline-end: 0.35em;
   animation: spin 0.8s linear infinite;
+}
+
+.schedule-editor__time-row .form-field {
+  min-width: 0;
+}
+.schedule-editor__time-row input,
+.schedule-editor__time-row select {
+  min-width: 0;
+  max-width: 100%;
+}
+@media (max-width: 600px) {
+  .schedule-editor__time-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Program names get a full line on phones; music-track rows stay compact. */
+@media (max-width: 600px) {
+  .radio-page__schedule .radio-page__upcoming-list li {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+  }
+  .radio-page__schedule .radio-page__upcoming-time {
+    order: 0;
+    align-items: flex-start;
+    text-align: left;
+    white-space: normal;
+    max-width: 100%;
+  }
+  .radio-page__schedule .radio-page__upcoming-track {
+    order: 1;
+    display: block;
+    width: 100%;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+}
+.program-period__choices {
+  border: 1px solid var(--nf-border);
+  border-radius: var(--nf-radius-sm);
+  padding: 0.8rem;
+  margin: 1rem 0;
+  display: grid;
+  gap: 0.65rem;
+}
+.program-period__choices label {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+}
+.program-period__summary {
+  margin: 1rem 0;
+  overflow-wrap: anywhere;
 }

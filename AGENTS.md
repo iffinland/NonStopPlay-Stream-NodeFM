@@ -23,3 +23,8 @@ iterations until explicitly authorized. Final main publication, tags, release,
 deployment and QDN transactions require explicit owner authorization. The
 initial import and audit were authorized separately; that does not authorize
 releasing an untested conversion.
+
+Release descriptors under `.github/releases/` trigger the repository's release
+workflow on main. Change/add them only for an explicitly owner-authorized release.
+The accepted runtime archive is a release input; preserve its tested bytes.
+Normal implementation/documentation changes do not authorize a descriptor update.

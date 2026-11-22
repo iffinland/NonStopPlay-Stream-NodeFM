@@ -229,7 +229,7 @@ function getPlaylistVersionTrackLabel(value: unknown): string {
 // ── QDN Identity Helpers ────────────────────────────────────────────
 //
 // QDN resource identity lives in the `identifier` field.
-// The `name` field is the publisher's registered Qortium name.
+// The `name` field is the publisher's registered Qortal name.
 
 export function getPlaylistQdnIdentifier(playlistId: string): string {
   return `nodefm-playlist-${playlistId}`;

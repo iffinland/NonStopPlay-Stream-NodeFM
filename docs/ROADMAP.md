@@ -1,14 +1,21 @@
 # Development Roadmap
 
-## Qortal port checkpoint — 2026-11-22
+## Qortal port accepted — 2026-11-22
 
-Owner runtime accepted `0.1.0-qortal-rc.5`, including the progress and in-app
-submission-preview refinements. Qortal port phases 1–2 are complete for foreground
-Hub operation. Main checkpoint publication is owner-authorized. Phase 3 (durable
-removal, messages/tips and remaining integration) has not started. Android
-background playback is excluded; final release validation remains a later gate.
-See [current scope](QORTAL-PHASE2.md) and
-[acceptance evidence](../reports/QORTAL-RC5-ACCEPTANCE.md).
+RC.9 owner native runtime and all tests passed. The complete accumulated Qortal
+port is accepted for foreground Hub operation. The owner authorized the main
+update, finalized documentation and official release. See
+[acceptance/provenance](../reports/QORTAL-RC9-ACCEPTANCE.md),
+[release notes](RELEASE-NOTES-RC9.md) and [release runbook](RELEASE.md).
+
+Completed work includes transport/authentication, playback and publication;
+collaborator permissions; durable removal and complete discovery; long metadata;
+native social actions; one-approval batches; bounded schedules/Request Shows;
+visible date/period UI and mobile schedule title layout.
+
+There is no remaining native acceptance gate for this release. Android background
+playback is outside the accepted scope. Future features/fixes are separate work
+and retain the runtime-before-release workflow.
 
 The phase numbers below describe the original imported Qortium product roadmap,
 not the Qortal port phases in the compatibility audit.

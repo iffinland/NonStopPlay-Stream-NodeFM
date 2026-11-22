@@ -14,6 +14,7 @@ import {
   formatZonedDateInput,
   localDateForWeekday,
   parseLocalTimeInput,
+  parseLocalDateInput,
   requireUnambiguousZonedUtcMs,
 } from './timezone';
 import {
@@ -22,7 +23,22 @@ import {
   validateScheduleRecurrence,
 } from './scheduleService';
 
-export const DEFAULT_RECURRENCE_HORIZON_DAYS = 56;
+export const DEFAULT_RECURRENCE_MONTHS = 1;
+
+/** Inclusive end of a bounded calendar-month publication period. */
+export function recurrencePeriodEnd(start: string, months = DEFAULT_RECURRENCE_MONTHS): string {
+  if (!Number.isInteger(months) || months < 1 || months > 12)
+    throw new Error('Choose a publication period between 1 and 12 months.');
+  const { year, month, day } = parseLocalDateInput(start);
+  const target = new Date(Date.UTC(year, month - 1 + months, 1));
+  const last = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  const date = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), Math.min(day, last)),
+  );
+  return addDaysToLocalDate(date.toISOString().slice(0, 10), -1);
+}
 
 export type RecurrenceCompileFailure = {
   ok: false;
@@ -104,8 +120,8 @@ function isValidCompileInput(recurrence: ScheduleRecurrence, nowUtcMs: number): 
 /**
  * Generate bounded future concrete events for a recurrence definition.
  *
- * The horizon is the shorter of the recurrence active-until date and
- * DEFAULT_RECURRENCE_HORIZON_DAYS from the current station-local date.
+ * An omitted end defaults to one calendar month. Explicit periods are fully
+ * compiled up to twelve months; runtime never extends them automatically.
  *
  * Ambiguous/nonexistent local wall times cause the entire compilation to
  * fail with a date-specific error rather than being silently resolved.
@@ -121,17 +137,17 @@ export function compileScheduleRecurrence(
 
   const time = parseLocalTimeInput(recurrence.localStartTime);
   const localToday = formatZonedDateInput(nowUtcMs, recurrence.timezone);
-  const horizonEnd = addDaysToLocalDate(localToday, DEFAULT_RECURRENCE_HORIZON_DAYS);
 
   const effectiveFrom =
     compareLocalDates(recurrence.activeFromLocalDate, localToday) > 0
       ? recurrence.activeFromLocalDate
       : localToday;
-  const effectiveUntil =
-    recurrence.activeUntilLocalDate &&
-    compareLocalDates(recurrence.activeUntilLocalDate, horizonEnd) < 0
-      ? recurrence.activeUntilLocalDate
-      : horizonEnd;
+  const effectiveUntil = recurrence.activeUntilLocalDate ?? recurrencePeriodEnd(effectiveFrom);
+  if (compareLocalDates(effectiveUntil, recurrencePeriodEnd(effectiveFrom, 12)) > 0)
+    return {
+      ok: false,
+      errors: ['Choose a publication period of at most 12 months. Nothing was published.'],
+    };
 
   if (compareLocalDates(effectiveFrom, effectiveUntil) > 0) {
     return { ok: true, events: [], generatedDates: [] };

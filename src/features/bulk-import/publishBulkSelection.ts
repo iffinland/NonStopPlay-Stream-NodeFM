@@ -8,7 +8,7 @@ import { requireAccountWrite } from '../../qortium/accountWriteGate';
 import { generateId } from '../../utils/id';
 import { deserializeTrackFromQdn } from '../tracks/services/trackService';
 import type { Track } from '../../types/domain';
-import { getBulkImportBatchSummary } from './selectors';
+import { getBulkImportBatchSummary, getBulkImportPublicationStatus } from './selectors';
 import {
   createBulkImportMetadataArtifact,
   type BulkImportMetadataArtifact,
@@ -28,6 +28,7 @@ export type BulkSelectionOptions = {
   commit: (batch: BulkImportBatch) => void;
   actorName: string;
   actorAddress: string;
+  stationOwnerAddress?: string;
   getSource: (
     row: BulkImportRow,
     kind: 'audio' | 'cover',
@@ -40,7 +41,7 @@ export type BulkSelectionOptions = {
   gate?: typeof requireAccountWrite;
 };
 
-/** One user action, media batches then canonical metadata batches. No automatic write retries. */
+/** Plan the complete user action, journal it, then request one Hub approval. */
 export async function publishBulkSelection(options: BulkSelectionOptions): Promise<void> {
   const { actorName: name, actorAddress: address } = options;
   const initial = options.getBatch();
@@ -129,110 +130,123 @@ export async function publishBulkSelection(options: BulkSelectionOptions): Promi
     options.commit(applyBulkPublicationRowResultToBatch(options.getBatch(), result));
   };
   async function send(items: Item[], label: string) {
-    for (let offset = 0; offset < items.length; offset += 10) {
-      assertCurrent();
-      await (options.gate ?? requireAccountWrite)('PUBLISH_MULTIPLE_QDN_RESOURCES', address);
-      assertCurrent();
-      const chunk = items.slice(offset, offset + 10);
-      options.onProgress(`${label} · ${Math.min(offset + 10, items.length)} / ${items.length}`);
-      const steps = chunk.map((item) => ({
+    if (!items.length) return;
+    assertCurrent();
+    await (options.gate ?? requireAccountWrite)('PUBLISH_MULTIPLE_QDN_RESOURCES', address);
+    assertCurrent();
+    const chunk = items;
+    options.onProgress(`${label} · ${items.length} / ${items.length}`);
+    const steps = chunk.map((item) => ({
+      batchId: initial.id,
+      rowId: item.row.id,
+      sourceGeneration: item.row.sourceGeneration,
+      step: item.kind,
+      intent: qortalBulkCoordinate(item.row, initial.role, name, item.kind),
+      contentRevision: revision(item.row, item.kind),
+      attemptId: generateId(),
+    }));
+    // Synchronous durable commit precedes dispatch; crashed requests stay unknown.
+    let pending = options.getBatch();
+    for (const step of steps)
+      pending = applyBulkPublicationRowResultToBatch(pending, {
         batchId: initial.id,
-        rowId: item.row.id,
-        sourceGeneration: item.row.sourceGeneration,
-        step: item.kind,
-        intent: qortalBulkCoordinate(item.row, initial.role, name, item.kind),
-        contentRevision: revision(item.row, item.kind),
-        attemptId: generateId(),
-      }));
-      // Synchronous durable commit precedes dispatch; crashed requests stay unknown.
-      let pending = options.getBatch();
-      for (const step of steps)
-        pending = applyBulkPublicationRowResultToBatch(pending, {
-          batchId: initial.id,
-          rowId: step.rowId,
-          sourceGeneration: step.sourceGeneration,
-          status: 'unknown',
-          steps: [{ ...step, status: 'unknown' }],
-        });
-      options.commit(pending);
-      let response;
-      try {
-        response = await (options.publish ?? publishMultipleResources)(
-          chunk.map((item) => item.input),
+        rowId: step.rowId,
+        sourceGeneration: step.sourceGeneration,
+        status: 'unknown',
+        steps: [{ ...step, status: 'unknown' }],
+      });
+    options.commit(pending);
+    let response;
+    try {
+      response = await (options.publish ?? publishMultipleResources)(
+        chunk.map((item) => item.input),
+      );
+    } catch (error) {
+      if (error instanceof QdnPublishPreflightError) {
+        steps.forEach((step, index) =>
+          apply(chunk[index], {
+            ...step,
+            status: 'failed',
+            error: { code: 'PUBLISH_PREFLIGHT_FAILED', message: error.message, retryable: true },
+          }),
         );
-      } catch (error) {
-        if (error instanceof QdnPublishPreflightError) {
-          steps.forEach((step, index) =>
-            apply(chunk[index], {
-              ...step,
-              status: 'failed',
-              error: { code: 'PUBLISH_PREFLIGHT_FAILED', message: error.message, retryable: true },
-            }),
-          );
-          throw error;
-        }
-        throw new Error(
-          `Publication stopped: ${error instanceof Error ? error.message : 'Unknown result'}. Check pending publications before retrying.`,
-        );
+        throw error;
       }
-      let incomplete = false;
-      let unknown = false;
-      let failureMessage = '';
-      for (let index = 0; index < chunk.length; index++) {
-        const item = chunk[index],
-          step = steps[index];
-        const success = response.published.find(
+      throw new Error(
+        `Publication stopped: ${error instanceof Error ? error.message : 'Unknown result'}. Check pending publications before retrying.`,
+      );
+    }
+    let incomplete = false;
+    let unknown = false;
+    let failureMessage = '';
+    for (let index = 0; index < chunk.length; index++) {
+      const item = chunk[index],
+        step = steps[index];
+      const success = response.published.find(
+        (value) =>
+          value.resource.name === name &&
+          value.resource.service === step.intent.service &&
+          value.resource.identifier === step.intent.identifier,
+      );
+      if (success?.transactionSignature) {
+        apply(item, {
+          ...step,
+          status: 'published',
+          reference: { service: step.intent.service, name, identifier: step.intent.identifier! },
+          confirmedContentRevision: step.contentRevision,
+          transactionSignature: success.transactionSignature,
+          confirmedAt: new Date().toISOString(),
+        });
+        const currentRow = options.getBatch().rows.find((row) => row.id === item.row.id);
+        if (
+          item.artifact &&
+          initial.role === 'admin' &&
+          currentRow &&
+          getBulkImportPublicationStatus(currentRow) === 'complete'
+        ) {
+          const track = deserializeTrackFromQdn(JSON.parse(item.artifact.json));
+          if (track) options.onTrack?.(track);
+        }
+      } else {
+        incomplete = true;
+        const failure = response.failures.find(
           (value) =>
             value.resource.name === name &&
             value.resource.service === step.intent.service &&
             value.resource.identifier === step.intent.identifier,
         );
-        if (success?.transactionSignature) {
+        if (failure && failure.outcome !== 'unknown')
           apply(item, {
             ...step,
-            status: 'published',
-            reference: { service: step.intent.service, name, identifier: step.intent.identifier! },
-            confirmedContentRevision: step.contentRevision,
-            transactionSignature: success.transactionSignature,
-            confirmedAt: new Date().toISOString(),
+            status: 'failed',
+            error: { code: 'PUBLISH_FAILED', message: failure.error, retryable: true },
           });
-          if (item.artifact && initial.role === 'admin') {
-            const track = deserializeTrackFromQdn(JSON.parse(item.artifact.json));
-            if (track) options.onTrack?.(track);
-          }
-        } else {
-          incomplete = true;
-          const failure = response.failures.find(
-            (value) =>
-              value.resource.name === name &&
-              value.resource.service === step.intent.service &&
-              value.resource.identifier === step.intent.identifier,
-          );
-          if (failure && failure.outcome !== 'unknown')
-            apply(item, {
-              ...step,
-              status: 'failed',
-              error: { code: 'PUBLISH_FAILED', message: failure.error, retryable: true },
-            });
-          else unknown = true;
-          failureMessage ||= failure?.error ?? 'No publication result was returned.';
-        }
+        else unknown = true;
+        failureMessage ||= failure?.error ?? 'No publication result was returned.';
       }
-      if (incomplete)
-        throw new Error(
-          unknown
-            ? 'Some resources were not confirmed. Confirmed uploads are saved; check pending publications before continuing.'
-            : `Publication stopped: ${failureMessage}. Confirmed uploads are saved; correct the issue and continue.`,
-        );
     }
+    if (incomplete)
+      throw new Error(
+        unknown
+          ? 'Some resources were not confirmed. Confirmed uploads are saved; check pending publications before continuing.'
+          : `Publication stopped: ${failureMessage}. Confirmed uploads are saved; correct the issue and continue.`,
+      );
   }
-  await send(media, 'Publishing audio and covers');
   assertCurrent();
   const metadata: Item[] = [];
   const current = options.getBatch();
   for (const row of current.rows.filter((row) => ids.includes(row.id))) {
     if (confirmed(row, 'metadata')) continue;
-    const artifact = createBulkImportMetadataArtifact(current, row, name, address);
+    const artifact = createBulkImportMetadataArtifact(
+      current,
+      row,
+      name,
+      initial.role === 'admin' ? (options.stationOwnerAddress ?? address) : address,
+      {
+        audio: qortalBulkCoordinate(row, initial.role, name, 'audio'),
+        cover: row.cover ? qortalBulkCoordinate(row, initial.role, name, 'cover') : undefined,
+      },
+    );
     if (artifact.sizeBytes > QORTAL_JSON_MAX_BYTES)
       throw new Error(
         'Track details exceed the 25 KiB Qortal JSON limit. Shorten the metadata before continuing.',
@@ -252,7 +266,7 @@ export async function publishBulkSelection(options: BulkSelectionOptions): Promi
     });
   }
   await send(
-    metadata,
+    [...media, ...metadata],
     initial.role === 'listener' ? 'Submitting track details' : 'Publishing track details',
   );
   options.onProgress(

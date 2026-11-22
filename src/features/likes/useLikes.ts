@@ -99,7 +99,7 @@ export function useLikes(trackIds: readonly string[]): UseLikesResult {
   const toggleLike = useCallback(
     async (trackId: string) => {
       if (!ownerName || !userAddress) {
-        throw new Error('A registered Qortium name and selected account are required to Like.');
+        throw new Error('A registered Qortal name and selected account are required to Like.');
       }
 
       const currentLiked = isTrackLikedByUser(trackId, userAddress, getLikeRecords());

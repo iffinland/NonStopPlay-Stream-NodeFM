@@ -7,6 +7,7 @@
  * ============================================================ */
 
 import { sendDirectChatMessage, type DirectChatMessageResult } from '../../../qortium/social';
+import { buildQortalDirectMessageRequest, qortalChatMessageBytes } from '../../../qortium/social';
 
 export type SendStationMessageInput = {
   recipientAddress: string;
@@ -27,27 +28,16 @@ export function validateStationMessageInput(input: SendStationMessageInput): voi
     throw new Error('Message text is required.');
   }
 
-  if (new TextEncoder().encode(input.message).length > 4000) {
-    throw new Error('Message exceeds the Qortium chat message size limit.');
+  if (qortalChatMessageBytes(input.message.trim()) > 4000) {
+    throw new Error('Message exceeds the Qortal chat message size limit. Shorten the message.');
   }
 }
 
 /**
- * Build the exact Qortium bridge request shape for contract tests.
+ * Build the exact Qortal Hub request shape for contract tests.
  */
-export function buildDirectMessageRequest(
-  recipientAddress: string,
-  message: string,
-): {
-  action: 'SEND_CHAT_MESSAGE';
-  recipientAddress: string;
-  message: string;
-} {
-  return {
-    action: 'SEND_CHAT_MESSAGE',
-    recipientAddress,
-    message,
-  };
+export function buildDirectMessageRequest(recipientAddress: string, message: string) {
+  return buildQortalDirectMessageRequest(recipientAddress, message);
 }
 
 export async function sendStationMessage(

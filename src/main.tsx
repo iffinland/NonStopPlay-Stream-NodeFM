@@ -7,8 +7,10 @@ import { createRoot } from 'react-dom/client';
 import { App } from './app/App';
 import { installWindowStartupDiagnostics } from './services/perf/startupDiagnostics';
 import './index.css';
+import { initializeCollaboration } from './features/collaboration/collaborationService';
 
 installWindowStartupDiagnostics();
+initializeCollaboration();
 
 const rootElement = document.getElementById('root');
 

@@ -6,28 +6,38 @@ the station clock. No continuously running streaming server is required.
 
 Working repository: <https://github.com/iffinland/NonStopPlay-Stream-NodeFM>.
 
-## Current accepted version
+## Runtime-accepted Qortal release
 
-**0.1.0-qortal-rc.5 — owner runtime passed, including the progress/preview addendum
-(2026-11-22).** Qortal port phases 1 and 2 are accepted for foreground operation
-while Hub/the app is open. Android background playback is outside the scope.
+**0.1.0-qortal-rc.9 — owner runtime and all tests passed (2026-11-22).**
+The owner authorized the complete main update and official GitHub release.
+
+- [Release page](https://github.com/iffinland/NonStopPlay-Stream-NodeFM/releases/tag/v0.1.0-qortal-rc.9)
+- [Runtime APP ZIP](https://github.com/iffinland/NonStopPlay-Stream-NodeFM/releases/download/v0.1.0-qortal-rc.9/NodeFM_0.1.0-qortal-rc.9.zip)
+- [Release source ZIP](https://github.com/iffinland/NonStopPlay-Stream-NodeFM/releases/download/v0.1.0-qortal-rc.9/NodeFM_0.1.0-qortal-rc.9_release-source.zip)
+- [SHA256SUMS](https://github.com/iffinland/NonStopPlay-Stream-NodeFM/releases/download/v0.1.0-qortal-rc.9/SHA256SUMS)
+
+The runtime ZIP is exactly the tested RC.9 archive, with index.html and LICENSE
+at root. Publish it as the existing default-identifier APP, `qortal://APP/NodeFM/`.
+The source ZIP contains the release commit, finalized docs and a file checksum
+snapshot. See [release notes](docs/RELEASE-NOTES-RC9.md) and
+[owner acceptance](reports/QORTAL-RC9-ACCEPTANCE.md).
 
 Implemented and accepted:
 
-- Hub automatic account authentication and registered APP publisher Admin access;
-- Qortal resource reads, foreground radio/playlist playback and navigation;
-- local audio/cover uploads and QDN audio search/add with duration recovery;
-- immediate library updates after confirmed Track publication;
-- single listener submissions, review, acceptance and rejection;
-- one-action bulk publication: select files, edit metadata, then Publish selected
-  or Submit selected; Hub approves the media and track-detail batches;
-- station configuration and playlist/version publication;
-- rotating progress indicators, no signed Retry buttons in transaction dialogs,
-  and in-app listener audio preview using the complete AUDIO identifier.
+- owner-managed named collaborators/DJs publishing under their own names/wallets;
+- durable removal, complete station discovery and bounded long metadata;
+- one Hub approval for complete uploads, bulk selections, programs and lineups;
+- visible start/end dates, Once/Daily/Weekly selection and real period review;
+- full Upcoming Schedule names on phones, progress and in-app audio preview;
+- encrypted native owner Chat, QORT tips, listener/public playlists and moderation;
+- deterministic foreground radio, scheduled programs and Request Show playback.
 
-Pending Qortal port phases: durable resource removal, messages/tips and remaining
-feature integration, followed by final release validation. Unported bridge actions
-fail explicitly. RC.5 is an accepted development checkpoint, not a final release.
+See [user/station guide](docs/USER-GUIDE.md),
+[schedule UI](docs/QORTAL-SCHEDULE-UI.md),
+[batch publication](docs/QORTAL-BATCH-PUBLISHING.md) and
+[collaborators](docs/QORTAL-COLLABORATORS.md).
+Keep Hub/the APP open for supported playback; Android background operation is
+outside this release's scope. Update/reopen all working APP tabs.
 
 ## Build and publish
 
@@ -42,7 +52,8 @@ npm run format:check
 Package the **contents** of `dist/`, with `index.html` at the ZIP root, and retain
 `LICENSE`. Publish the runtime ZIP as the existing Qortal APP using its default
 identifier. Do not publish the source ZIP. The registered owner of the deployed
-APP name receives Admin access; other accounts remain station guests.
+APP name receives owner access. Only accounts granted by this owner receive
+collaborator Admin access; all other accounts remain station guests.
 
 Publishing/signing/fees use Qortal Hub approvals. Do not repeat an unknown signed
 request: for bulk work, use Check pending publications, then continue confirmed
@@ -81,10 +92,11 @@ Durable specifications:
 
 ## Verification and workflow
 
-Accepted RC.5: **113 test files / 925 tests**, production build, ESLint, formatting
-and Git whitespace checks passed. Automated host fixtures supplement the owner's
-native Hub runtime result; they do not independently prove native compatibility.
-No live QDN transactions are performed by the test suite.
+**119 test files / 993 tests passed**, with TypeScript/Vite production build,
+ESLint, formatting and whitespace checks. Owner RC.9 native runtime passed.
+See [acceptance and release provenance](reports/QORTAL-RC9-ACCEPTANCE.md).
+Controlled host fixtures supplement that runtime result; tests send no live
+QDN publication, payment or Chat.
 
 Follow [AGENTS.md](AGENTS.md). New development iterations are delivered as runtime
 and source ZIPs; commit/push follows owner authorization after runtime acceptance.

@@ -14,9 +14,10 @@ type ModalProps = {
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  busy?: boolean;
 };
 
-export function Modal({ title, onClose, children, wide = false }: ModalProps) {
+export function Modal({ title, onClose, children, wide = false, busy = false }: ModalProps) {
   const titleId = useId();
 
   return createPortal(
@@ -31,7 +32,13 @@ export function Modal({ title, onClose, children, wide = false }: ModalProps) {
           <h2 className="modal__title" id={titleId}>
             {title}
           </h2>
-          <button className="modal__close" type="button" aria-label="Close" onClick={onClose}>
+          <button
+            className="modal__close"
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            disabled={busy}
+          >
             ✕
           </button>
         </div>

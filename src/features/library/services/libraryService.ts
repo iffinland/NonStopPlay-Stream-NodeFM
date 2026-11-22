@@ -353,8 +353,7 @@ export async function updateTrack(
 /**
  * Remove a track from the library.
  *
- * Uses the current Qortium Home `DELETE_QDN_RESOURCE` action to tombstone
- * the track metadata resource. The separate AUDIO/COVER QDN resources are
+ * Publishes a durable station removal marker for the track metadata. The separate AUDIO/COVER QDN resources are
  * intentionally left intact.
  */
 export async function removeTrackFromLibrary(trackId: string, ownerName: string): Promise<void> {

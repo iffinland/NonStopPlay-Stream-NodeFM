@@ -2,11 +2,12 @@
  * NodeFM Station — Tip Domain Service
  *
  * Native-QORT tip validation and bridge composition. Payments
- * always go through Qortium Home's SEND_COIN approval flow and
+ * always go through Qortal Hub's SEND_COIN approval flow and
  * are never retried automatically.
  * ============================================================ */
 
 import { sendNativeTip, type NativeTipResult } from '../../../qortium/social';
+import { buildQortalTipRequest } from '../../../qortium/social';
 
 export type SendStationTipInput = {
   recipient: string;
@@ -32,19 +33,8 @@ export function normalizeTipAmount(value: string): string {
   return trimmed;
 }
 
-export function buildNativeTipRequest(
-  recipient: string,
-  amount: string,
-): {
-  action: 'SEND_COIN';
-  recipient: string;
-  amount: string;
-} {
-  return {
-    action: 'SEND_COIN',
-    recipient,
-    amount,
-  };
+export function buildNativeTipRequest(recipient: string, amount: string) {
+  return buildQortalTipRequest(recipient, amount);
 }
 
 export function validateStationTipInput(input: SendStationTipInput): string {

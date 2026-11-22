@@ -96,7 +96,7 @@ export function TrackEditModal({ track, onClose }: Props) {
 
       if (coverFile) {
         if (!publisherName) {
-          throw new Error('A registered Qortium name is required to publish a cover.');
+          throw new Error('A registered Qortal name is required to publish a cover.');
         }
 
         if (!coverBase64) {

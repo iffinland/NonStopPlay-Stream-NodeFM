@@ -7,7 +7,7 @@
  * A Like is a user operation, not a mutable global count on the
  * Track. The reducer accepts only records whose QDN publisher
  * name matches the claimed publisher and whose claimed wallet
- * address matches the verified Qortium name owner.
+ * address matches the verified Qortal name owner.
  * ============================================================ */
 
 import { isNonEmptyTrimmedString } from '../../../utils/validation';

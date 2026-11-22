@@ -1,8 +1,16 @@
 # Admin and Scheduler Specification
 
+**Release acceptance, 2026-11-22:** the owner confirmed RC.9 runtime and all tests passed, and authorized main/tag/release publication. Earlier candidate/pending statements below describe their historical checkpoints and are superseded by the [accepted release](../reports/QORTAL-RC9-ACCEPTANCE.md).
+
+Current candidate: RC.8 adds [bounded periods and one-approval publication](QORTAL-BATCH-PUBLISHING.md), including single-document access changes. Native acceptance is pending.
+
 ## 1. Access
 
-Admin routes are owner-only initially.
+Qortal RC.6 adds owner-managed collaborators. The registered APP owner alone
+manages membership; named collaborators receive the other available management
+functions and publish/pay from their own accounts. See the authoritative
+[Qortal collaborator contract](QORTAL-COLLABORATORS.md). The owner accepted RC.6 native Hub runtime on 2026-11-22.
+RC.7 adds [durable removal and integrated acceptance](QORTAL-PHASE3-4.md). The remaining document describes the imported UI.
 
 Requirements:
 

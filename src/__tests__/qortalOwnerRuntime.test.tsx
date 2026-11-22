@@ -156,7 +156,7 @@ describe('real app shell with Qortal account and publisher evidence', () => {
       expect(host.published.map((r) => r.service)).toEqual(['AUDIO', 'AUDIO', 'JSON', 'JSON']);
       expect(
         host.requests.filter((action) => action === 'PUBLISH_MULTIPLE_QDN_RESOURCES'),
-      ).toHaveLength(2);
+      ).toHaveLength(1);
       if (role === 'admin') expect(getLibraryTracks()).toHaveLength(2);
       else expect(host.published[0].identifier).toMatch(/^nodefm-submission-audio-/);
     },

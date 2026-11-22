@@ -50,6 +50,7 @@ describe('native tip request contract', () => {
   it('builds the exact SEND_COIN request shape', () => {
     expect(buildNativeTipRequest('Q-owner', '1.25')).toEqual({
       action: 'SEND_COIN',
+      coin: 'QORT',
       recipient: 'Q-owner',
       amount: '1.25',
     });
@@ -58,10 +59,9 @@ describe('native tip request contract', () => {
   it('sends a valid tip exactly once and parses success', async () => {
     mockedSend.mockImplementation(
       withUnlockedTestAccount(async () => ({
-        accepted: true,
+        signature: 'tip-tx',
         recipient: 'Q-owner',
-        amount: '1.25',
-        transactionSignature: 'tip-tx',
+        amount: 1.25,
       })),
     );
 
@@ -76,6 +76,7 @@ describe('native tip request contract', () => {
     ).toHaveLength(1);
     expect(mockedSend).toHaveBeenCalledWith({
       action: 'SEND_COIN',
+      coin: 'QORT',
       recipient: 'Q-owner',
       amount: '1.25',
     });

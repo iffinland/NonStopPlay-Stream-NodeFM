@@ -17,6 +17,7 @@ import {
   computeMetadataContentRevision,
   stableContentFingerprint,
 } from './contentRevision';
+import { qortalBulkCoordinate } from './qortalBulkCoordinates';
 import { publicationStepMatchesContent } from './publicationJournal';
 import type {
   BulkImportBatch,
@@ -80,7 +81,7 @@ function requiredPositiveDuration(durationMs: number | null): number {
 function requiredActorName(name: string | null): string {
   const normalized = name?.trim();
   if (!normalized) {
-    throw new Error('A registered Qortium name is required before metadata export.');
+    throw new Error('A registered Qortal name is required before metadata export.');
   }
   return normalized;
 }
@@ -112,12 +113,13 @@ export function buildBulkImportMetadataDocument(
   row: BulkImportRow,
   actorName: string | null,
   actorAddress: string | null,
+  planned?: { audio: QdnResourceRef; cover?: QdnResourceRef },
 ): string {
   const durationMs = requiredPositiveDuration(row.durationMs);
   const audioRevision = computeAudioContentRevision(row.localSource, row.sourceGeneration);
   const audioStep = currentPublishedStep(row.publication.audio, 'audio', audioRevision);
 
-  if (!audioStep) {
+  if (!audioStep && !planned?.audio) {
     throw new Error('AUDIO must be published before metadata can be exported.');
   }
 
@@ -125,7 +127,7 @@ export function buildBulkImportMetadataDocument(
   const coverStep =
     row.cover === null ? null : currentPublishedStep(row.publication.cover, 'cover', coverRevision);
 
-  if (row.cover !== null && !coverStep) {
+  if (row.cover !== null && !coverStep && !planned?.cover) {
     throw new Error('COVER must be published before metadata can be exported.');
   }
 
@@ -136,8 +138,22 @@ export function buildBulkImportMetadataDocument(
 
   const publisherName = requiredActorName(actorName);
   const publisherAddress = requiredActorAddress(actorAddress);
-  const audio = asReference(audioStep.confirmed);
-  const cover = coverStep ? asReference(coverStep.confirmed) : undefined;
+  if (planned) {
+    for (const kind of ['audio', 'cover'] as const) {
+      const ref = planned[kind];
+      if (kind === 'cover' && !row.cover) continue;
+      const expected = qortalBulkCoordinate(row, batch.role, publisherName, kind);
+      if (
+        !ref ||
+        ref.service !== expected.service ||
+        ref.name !== expected.name ||
+        ref.identifier !== expected.identifier
+      )
+        throw new Error('Planned media references must match this publication batch.');
+    }
+  }
+  const audio = planned?.audio ?? asReference(audioStep!.confirmed);
+  const cover = planned?.cover ?? (coverStep ? asReference(coverStep.confirmed) : undefined);
   const artist = emptyToUndefined(row.metadata.artist);
   const album = emptyToUndefined(row.metadata.album);
   const releaseDate = emptyToUndefined(row.metadata.releaseDate);
@@ -204,8 +220,9 @@ export function createBulkImportMetadataArtifact(
   row: BulkImportRow,
   actorName: string | null,
   actorAddress: string | null,
+  planned?: { audio: QdnResourceRef; cover?: QdnResourceRef },
 ): BulkImportMetadataArtifact {
-  const json = buildBulkImportMetadataDocument(batch, row, actorName, actorAddress);
+  const json = buildBulkImportMetadataDocument(batch, row, actorName, actorAddress, planned);
 
   return {
     fileName: getBulkImportMetadataExportFilename(row.id, batch.role),

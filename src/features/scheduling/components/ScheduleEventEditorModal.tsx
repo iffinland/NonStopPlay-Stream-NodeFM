@@ -7,7 +7,7 @@ import { Spinner } from '../../../components/Spinner';
  * Request Show dynamic-program sources.
  * ============================================================ */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '../../../components/Modal';
 import { UtcTimeInput } from '../../../components/UtcTimeInput';
 import { QdnTransactionFlow } from '../../../components/QdnTransactionFlow';
@@ -21,16 +21,16 @@ import { usePlaylists } from '../../../hooks/usePlaylists';
 import { useLibrary } from '../../../hooks/useLibrary';
 import { useLikes } from '../../likes/useLikes';
 import { useRequestShow } from '../../dynamic-programs/request-show/useRequestShow';
-import { materializeRequestShowOccurrenceAction } from '../../dynamic-programs/request-show/requestShowStore';
 import { useScheduler } from '../hooks/useScheduler';
-import {
-  createDynamicScheduleEventAction,
-  ScheduleEventMaterializationError,
-} from '../services/scheduleStore';
+import { saveScheduledProgramAction, saveRecurringProgramAction } from '../services/scheduleStore';
+import { ProgramPeriodDialog } from './ProgramPeriodDialog';
 import type { ScheduleEvent, Track } from '../../../types/domain';
+import { getNowUtcMs } from '../../radio/timeline';
 import { isValidDurationMs } from '../../../utils/duration';
 import {
   parseLocalDateInput,
+  formatZonedDateInput,
+  addDaysToLocalDate,
   parseLocalTimeInput,
   requireUnambiguousZonedUtcMs,
 } from '../services/timezone';
@@ -43,17 +43,6 @@ export type ScheduleEventEditorModalProps = {
   initialEndTime?: string;
   onClose: () => void;
 };
-
-function toDateInput(utcMs: number, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  })
-    .format(new Date(utcMs))
-    .replace(/-/g, '-');
-}
 
 function toTimeInput(utcMs: number, timeZone: string): string {
   return new Intl.DateTimeFormat('en-GB', {
@@ -93,15 +82,19 @@ export function ScheduleEventEditorModal({
   onClose,
 }: ScheduleEventEditorModalProps) {
   const { station } = useStation();
-  const { publisherName } = useStationIdentity();
+  const { publisherName, ownerAddress } = useStationIdentity();
   const { playlists, getVersions } = usePlaylists();
-  const { createEvent, updateEvent, deleteEvent, getEvent } = useScheduler();
+  const { deleteEvent } = useScheduler();
   const { tracks: libraryTracks, loaded: libraryLoaded, loading: libraryLoading } = useLibrary();
   const { definitions, loaded: requestShowLoaded, loading: requestShowLoading } = useRequestShow();
   const timeZone = station?.timezone ?? '';
 
   const [title, setTitle] = useState('');
   const [date, setDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [repeat, setRepeat] = useState<'once' | 'daily' | 'weekly'>('once');
+  const [daysOfWeek, setDaysOfWeek] = useState<number[]>([]);
+  const [reviewing, setReviewing] = useState(false);
   const [startTime, setStartTime] = useState('12:00');
   const [endTime, setEndTime] = useState('13:00');
   const [sourceType, setSourceType] = useState<'playlist' | 'dynamic-program'>('playlist');
@@ -110,9 +103,8 @@ export function ScheduleEventEditorModal({
   const [programDefinitionId, setProgramDefinitionId] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [materializationRecoveryEventId, setMaterializationRecoveryEventId] = useState<
-    string | null
-  >(null);
+  const writeStartedRef = useRef(false);
+  const [writeStarted, setWriteStarted] = useState(false);
   const [transaction, setTransaction] = useState<QdnTransactionState | null>(null);
 
   const eligibleTracks = useMemo(
@@ -134,7 +126,8 @@ export function ScheduleEventEditorModal({
 
     if (event) {
       setTitle(event.title ?? '');
-      setDate(toDateInput(Date.parse(event.startUtc), timeZone));
+      setDate(formatZonedDateInput(Date.parse(event.startUtc), timeZone));
+      setEndDate(formatZonedDateInput(Date.parse(event.endUtc), timeZone));
       setStartTime(toTimeInput(Date.parse(event.startUtc), timeZone));
       setEndTime(toTimeInput(Date.parse(event.endUtc), timeZone));
       setSourceType(event.source.type);
@@ -151,7 +144,8 @@ export function ScheduleEventEditorModal({
       return;
     }
 
-    setDate(initialDate ?? toDateInput(Date.now(), timeZone));
+    setDate(initialDate ?? formatZonedDateInput(Date.now(), timeZone));
+    setEndDate(initialDate ?? formatZonedDateInput(Date.now(), timeZone));
     setStartTime(initialStartTime ?? '12:00');
     setEndTime(initialEndTime ?? '13:00');
     setSourceType('playlist');
@@ -165,10 +159,7 @@ export function ScheduleEventEditorModal({
     [getVersions, playlistId],
   );
 
-  const materializeForScheduleEvent = async (
-    scheduleEvent: ScheduleEvent,
-    reuseExisting: boolean,
-  ) => {
+  const requestShowPlan = () => {
     const definition = definitions.find(
       (candidate) => candidate.programDefinitionId === programDefinitionId,
     );
@@ -178,7 +169,7 @@ export function ScheduleEventEditorModal({
     }
 
     if (!publisherName) {
-      throw new Error('A registered Qortium name is required to materialize Request Show.');
+      throw new Error('A registered Qortal name is required to materialize Request Show.');
     }
 
     if (!libraryLoaded) {
@@ -193,18 +184,15 @@ export function ScheduleEventEditorModal({
       throw new Error('Like records are not ready. Wait for Like loading to finish.');
     }
 
-    await materializeRequestShowOccurrenceAction(
-      scheduleEvent,
+    return {
       definition,
-      eligibleTracks,
-      rankFromAggregates(eligibleTracks, aggregates),
-      new Date().toISOString(),
-      publisherName,
-      { reuseExisting },
-    );
+      tracks: eligibleTracks,
+      ranking: rankFromAggregates(eligibleTracks, aggregates),
+    };
   };
 
-  const handleSave = async () => {
+  const handleSave = async (confirmedEnd?: string) => {
+    if (writeStartedRef.current) return;
     if (!timeZone) {
       setError('Station timezone is not configured.');
       return;
@@ -225,10 +213,15 @@ export function ScheduleEventEditorModal({
       const startParts = parseLocalTimeInput(startTime);
       const endParts = parseLocalTimeInput(endTime);
       const startUtcMs = requireUnambiguousZonedUtcMs({ ...dateParts, ...startParts }, timeZone);
-      const endUtcMs = requireUnambiguousZonedUtcMs({ ...dateParts, ...endParts }, timeZone);
+      const finishDate =
+        repeat === 'once' ? endDate : endTime <= startTime ? addDaysToLocalDate(date, 1) : date;
+      const endUtcMs = requireUnambiguousZonedUtcMs(
+        { ...parseLocalDateInput(finishDate), ...endParts },
+        timeZone,
+      );
 
       if (endUtcMs <= startUtcMs) {
-        setError('End time must be later than start time.');
+        setError('End date and time must be later than the start.');
         return;
       }
 
@@ -244,65 +237,53 @@ export function ScheduleEventEditorModal({
         source,
       };
 
+      if (!publisherName) throw new Error('A registered Qortal name is required.');
+      if (repeat !== 'once' && !ownerAddress)
+        throw new Error('Station owner identity is unavailable.');
+      if (repeat === 'weekly' && !daysOfWeek.length)
+        throw new Error('Select at least one weekday.');
+      const plan = sourceType === 'dynamic-program' ? requestShowPlan() : undefined;
+      if (repeat !== 'once' && !confirmedEnd) {
+        setError(null);
+        setReviewing(true);
+        return;
+      }
+      writeStartedRef.current = true;
+      setWriteStarted(true);
       setSaving(true);
       setError(null);
-      setMaterializationRecoveryEventId(null);
-
-      let savedEvent: ScheduleEvent | null = null;
-
-      if (mode === 'create' && sourceType === 'dynamic-program') {
-        if (!publisherName) {
-          throw new Error('A registered Qortium name is required to schedule a Request Show.');
-        }
-
-        savedEvent = await createDynamicScheduleEventAction(input, publisherName, (createdEvent) =>
-          materializeForScheduleEvent(createdEvent, true),
+      if (repeat === 'once') {
+        await saveScheduledProgramAction(
+          input,
+          publisherName,
+          mode === 'edit' ? event?.eventId : undefined,
+          plan,
         );
       } else {
-        savedEvent =
-          mode === 'create'
-            ? await createEvent(input)
-            : event
-              ? await updateEvent(event.eventId, input)
-              : null;
-
-        if (sourceType === 'dynamic-program' && savedEvent) {
-          await materializeForScheduleEvent(savedEvent, mode === 'create');
-        }
+        await saveRecurringProgramAction(
+          {
+            ownerAddress: ownerAddress!,
+            title: title.trim() || 'Scheduled program',
+            timezone: timeZone,
+            frequency: repeat,
+            daysOfWeek: repeat === 'weekly' ? daysOfWeek : undefined,
+            localStartTime: startTime,
+            durationMs: endUtcMs - startUtcMs,
+            activeFromLocalDate: date,
+            activeUntilLocalDate: confirmedEnd,
+            source,
+          },
+          publisherName,
+          getNowUtcMs(),
+          undefined,
+          plan,
+        );
       }
 
       onClose();
     } catch (saveError) {
-      if (saveError instanceof ScheduleEventMaterializationError) {
-        setMaterializationRecoveryEventId(saveError.event.eventId);
-      }
-
+      setReviewing(false);
       setError(saveError instanceof Error ? saveError.message : 'Failed to save schedule event.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRetryMaterialization = async () => {
-    if (!materializationRecoveryEventId || !publisherName) {
-      return;
-    }
-
-    const scheduleEvent = getEvent(materializationRecoveryEventId);
-    if (!scheduleEvent) {
-      setError('The published schedule event is no longer available to retry.');
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-
-    try {
-      await materializeForScheduleEvent(scheduleEvent, false);
-      setMaterializationRecoveryEventId(null);
-      onClose();
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Retry failed.');
     } finally {
       setSaving(false);
     }
@@ -356,8 +337,54 @@ export function ScheduleEventEditorModal({
     }
   };
 
+  if (reviewing && repeat !== 'once') {
+    const durationMs = (() => {
+      try {
+        const start = requireUnambiguousZonedUtcMs(
+          { ...parseLocalDateInput(date), ...parseLocalTimeInput(startTime) },
+          timeZone,
+        );
+        const finishDate = endTime <= startTime ? addDaysToLocalDate(date, 1) : date;
+        return (
+          requireUnambiguousZonedUtcMs(
+            { ...parseLocalDateInput(finishDate), ...parseLocalTimeInput(endTime) },
+            timeZone,
+          ) - start
+        );
+      } catch {
+        return 0;
+      }
+    })();
+    return (
+      <ProgramPeriodDialog
+        input={{
+          ownerAddress: ownerAddress ?? '',
+          title: title.trim() || 'Scheduled program',
+          timezone: timeZone,
+          frequency: repeat,
+          daysOfWeek: repeat === 'weekly' ? daysOfWeek : undefined,
+          localStartTime: startTime,
+          durationMs,
+          activeFromLocalDate: date,
+          source:
+            sourceType === 'playlist'
+              ? { type: 'playlist', playlistId, playlistVersionId: versionId }
+              : { type: 'dynamic-program', programDefinitionId },
+        }}
+        endDate={endDate || undefined}
+        busy={saving}
+        onBack={() => setReviewing(false)}
+        onConfirm={(until) => void handleSave(until)}
+      />
+    );
+  }
+
   return (
-    <Modal title={mode === 'create' ? 'Schedule Program' : 'Edit Program'} onClose={onClose}>
+    <Modal
+      title={mode === 'create' ? 'Schedule Program' : 'Edit Program'}
+      busy={saving}
+      onClose={saving ? () => undefined : onClose}
+    >
       {transaction ? (
         <QdnTransactionFlow
           title="Delete Program"
@@ -393,19 +420,81 @@ export function ScheduleEventEditorModal({
             </select>
           </label>
 
-          <label className="form-field">
-            Date ({timeZone || 'station timezone'})
-            <input
-              type="date"
-              value={date}
-              onChange={(changeEvent) => setDate(changeEvent.target.value)}
-            />
-          </label>
+          {mode === 'create' && (
+            <label className="form-field">
+              Repeat
+              <select
+                value={repeat}
+                onChange={(changeEvent) => {
+                  const value = changeEvent.target.value as 'once' | 'daily' | 'weekly';
+                  setRepeat(value);
+                  setEndDate(value === 'once' ? date : '');
+                }}
+              >
+                <option value="once">Once</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </select>
+            </label>
+          )}
+          {repeat === 'weekly' && (
+            <div className="form-field">
+              Weekdays
+              <div className="recurrence-editor__days">
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => (
+                  <button
+                    key={day}
+                    type="button"
+                    aria-pressed={daysOfWeek.includes(index)}
+                    className={`recurrence-editor__day${daysOfWeek.includes(index) ? ' recurrence-editor__day--active' : ''}`}
+                    onClick={() =>
+                      setDaysOfWeek((days) =>
+                        days.includes(index) ? days.filter((d) => d !== index) : [...days, index],
+                      )
+                    }
+                  >
+                    {day}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="schedule-editor__time-row">
+            <label className="form-field">
+              Start date ({timeZone || 'station timezone'})
+              <input
+                type="date"
+                value={date}
+                onChange={(changeEvent) => {
+                  const value = changeEvent.target.value;
+                  setDate(value);
+                  if (repeat === 'once' && endDate === date) setEndDate(value);
+                }}
+              />
+            </label>
+            <label className="form-field">
+              {repeat === 'once' ? 'End date' : 'End date (optional)'}
+              <input
+                type="date"
+                value={endDate}
+                min={date}
+                onChange={(changeEvent) => setEndDate(changeEvent.target.value)}
+                required={repeat === 'once'}
+              />
+            </label>
+          </div>
+          {repeat !== 'once' && (
+            <p>
+              Choose the publication period in the next dialog. Without an end date, one month is
+              selected by default.
+            </p>
+          )}
 
           <div className="schedule-editor__time-row">
             <label className="form-field">
               Start time ({timeZone || 'station timezone'})
               <UtcTimeInput
+                ariaLabel={`Start time (${timeZone || 'station timezone'})`}
                 value={startTime}
                 onChange={setStartTime}
                 suffix={timeZone || 'station timezone'}
@@ -414,6 +503,7 @@ export function ScheduleEventEditorModal({
             <label className="form-field">
               End time ({timeZone || 'station timezone'})
               <UtcTimeInput
+                ariaLabel={`End time (${timeZone || 'station timezone'})`}
                 value={endTime}
                 onChange={setEndTime}
                 suffix={timeZone || 'station timezone'}
@@ -479,17 +569,6 @@ export function ScheduleEventEditorModal({
 
           {error && <p className="form-error">{error}</p>}
 
-          {materializationRecoveryEventId ? (
-            <button
-              className="button button--secondary"
-              type="button"
-              onClick={handleRetryMaterialization}
-              disabled={saving}
-            >
-              Retry Request Show lineup
-            </button>
-          ) : null}
-
           <div className="form-actions">
             {mode === 'edit' && event && (
               <button
@@ -512,9 +591,10 @@ export function ScheduleEventEditorModal({
             <button
               className="button button--primary"
               type="button"
-              onClick={handleSave}
+              onClick={() => void handleSave()}
               disabled={
                 saving ||
+                writeStarted ||
                 !timeZone ||
                 (sourceType === 'playlist' && (!playlistId || !versionId)) ||
                 (sourceType === 'dynamic-program' &&

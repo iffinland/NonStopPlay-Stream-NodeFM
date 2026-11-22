@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAuth } from '../../app/providers/authContext';
 import { clearIdentityCaches } from '../../qortium/identity';
 import { usePublisherOwner } from './usePublisherOwner';
+import { useStationAccess } from '../collaboration/useStationAccess';
 import { getCanonicalNodeFmAppIdentity } from '../../qortium/navigation';
 import { recordStartupEvent } from '../../services/perf/startupDiagnostics';
 import type { Station } from '../../types/domain';
@@ -44,6 +45,8 @@ export function StationProvider({ children }: { children: ReactNode }) {
     auth,
   );
   const isOwner = publisherOwner.isOwner;
+  const access = useStationAccess(userAddress);
+  const canManage = isOwner || (access.enabled && access.canManage);
 
   const [station, setStation] = useState<Station | null>(getStation());
   const [loaded, setLoaded] = useState(getStationLoaded());
@@ -124,21 +127,21 @@ export function StationProvider({ children }: { children: ReactNode }) {
 
       const appIdentity = getCanonicalNodeFmAppIdentity();
       const publisherName = appIdentity.name;
-      if (!isOwner || !loaded || error) {
-        throw new Error('Only the verified Qortal app publisher can edit this station.');
+      if (!canManage || !loaded || error) {
+        throw new Error('A verified station administrator is required to edit this station.');
       }
 
       const nextStation = station
         ? editStation(station, input as EditStationInput)
         : createStation({
             ...(input as Omit<CreateStationInput, 'publisherName' | 'ownerAddress' | 'ownerName'>),
-            ownerAddress: userAddress,
+            ownerAddress: access.owner ?? userAddress,
             publisherName,
           });
 
       return saveStationConfig(nextStation, nextStation.publisherName);
     },
-    [userAddress, station, loaded, error, isOwner],
+    [userAddress, station, loaded, error, canManage, access.owner],
   );
 
   const value: StationContextValue = {
@@ -148,8 +151,10 @@ export function StationProvider({ children }: { children: ReactNode }) {
     error,
     publisherName,
     isOwner,
-    ownerLookupLoading: publisherOwner.loading,
-    ownerLookupError: publisherOwner.error,
+    canManage,
+    registeredOwnerAddress: access.owner,
+    ownerLookupLoading: publisherOwner.loading || (access.enabled && access.loading),
+    ownerLookupError: publisherOwner.error || (access.enabled ? access.error : null),
     saveStation,
     refresh,
   };

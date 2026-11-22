@@ -25,7 +25,7 @@ export type Station = {
   description?: string;
 
   /**
-   * The registered Qortium name under which station-owned QDN resources
+   * The registered Qortal name under which station-owned QDN resources
    * (station config, tracks, playlists, schedule, notices, etc.) are
    * published. This is intentionally distinct from `ownerName` (a display
    * label) and from the APP host identity (`APP / NodeFM / Radio-AutoDJ`).

@@ -57,7 +57,7 @@ describe('listener playlist identity', () => {
         ownerName: '',
         ownerAddress: 'Q-owner',
       }),
-    ).toThrow(/registered Qortium name/);
+    ).toThrow(/registered Qortal name/);
 
     expect(() =>
       createListenerPlaylistDraft({

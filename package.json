@@ -1,8 +1,8 @@
 {
   "name": "nodefm-station",
   "private": true,
-  "version": "0.1.0-qortal-rc.5",
-  "description": "NodeFM Station — A Qortal scheduled auto-DJ radio dApp",
+  "version": "0.1.0-qortal-rc.9",
+  "description": "NodeFM Station \u2014 A Qortal scheduled auto-DJ radio dApp",
   "author": "iffinland",
   "license": "GPL-3.0-only",
   "type": "module",
@@ -17,6 +17,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@noble/hashes": "2.4.0",
     "music-metadata": "^11.15.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -29,6 +30,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.4.0",
+    "esbuild": "^0.25.12",
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
@@ -38,7 +40,6 @@
     "typescript": "~5.8.0",
     "typescript-eslint": "^8.46.0",
     "vite": "^6.3.0",
-    "vitest": "^4.1.10",
-    "esbuild": "^0.25.12"
+    "vitest": "^4.1.10"
   }
 }

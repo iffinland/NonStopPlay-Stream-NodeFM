@@ -98,7 +98,7 @@ export function createListenerPlaylistSubmission(input: {
   submittedAt?: string;
 }): ListenerPlaylistSubmission {
   if (!isNonEmptyTrimmedString(input.listenerName)) {
-    throw new Error('A registered Qortium name is required.');
+    throw new Error('A registered Qortal name is required.');
   }
 
   if (!isNonEmptyTrimmedString(input.listenerAddress)) {

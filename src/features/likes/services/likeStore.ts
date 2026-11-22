@@ -73,7 +73,7 @@ function identityValidator(): LikeIdentityValidator {
         : {
             ok: false,
             code: 'IDENTITY_UNVERIFIED',
-            detail: 'Like wallet address does not match the verified Qortium name owner.',
+            detail: 'Like wallet address does not match the verified Qortal name owner.',
           };
     },
   };
@@ -338,7 +338,7 @@ export async function setTrackLike(
   userAddress: string,
 ): Promise<void> {
   if (!publisherName.trim()) {
-    throw new Error('A registered Qortium name is required to publish a Like.');
+    throw new Error('A registered Qortal name is required to publish a Like.');
   }
 
   if (!userAddress.trim()) {

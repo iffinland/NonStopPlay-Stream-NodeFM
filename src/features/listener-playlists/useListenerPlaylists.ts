@@ -2,7 +2,7 @@
  * NodeFM Station — useListenerPlaylists Hook
  *
  * React state bridge for listener-owned playlist store and draft
- * store. Every write requires a registered Qortium name from the
+ * store. Every write requires a registered Qortal name from the
  * authenticated account; no fallback owner is supported.
  * ============================================================ */
 
@@ -203,7 +203,7 @@ export function useListenerPlaylists(): UseListenerPlaylistsResult {
 
   const throwIfNoIdentity = useCallback(() => {
     if (!ownerName || !ownerAddress) {
-      throw new Error('A registered Qortium name is required to create and publish playlists.');
+      throw new Error('A registered Qortal name is required to create and publish playlists.');
     }
   }, [ownerName, ownerAddress]);
 

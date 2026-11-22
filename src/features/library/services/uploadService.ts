@@ -5,6 +5,7 @@ import {
   type MultiplePublishResult,
   type PublishMultipleResource,
 } from '../../../qortium/qdn';
+import { createTrack } from '../../tracks/services/trackService';
 import type { QdnResourceRef, Track } from '../../../types/domain';
 import { buildTrackCoverPublishResource, type PublishTrackCoverInput } from './coverService';
 import { trackPublishResource, upsertTrackLocally } from './libraryService';
@@ -132,4 +133,41 @@ export async function publishUploadTrackMetadata(
     );
   }
   upsertTrackLocally(track);
+}
+
+/** Prepare audio, cover and Track metadata before the only signed request. */
+export async function publishUploadTrackBundle(
+  input: PublishUploadMediaResourcesInput,
+  details: Omit<import('../../tracks/services/trackService').CreateTrackInput, 'audio' | 'cover'>,
+): Promise<Track> {
+  const audio = buildUploadAudioPublishResource(input);
+  const cover = input.cover ? buildTrackCoverPublishResource(input.cover) : undefined;
+  const track = createTrack({
+    ...details,
+    audio: { service: 'AUDIO', name: input.publisherName, identifier: input.audioIdentifier },
+    cover: cover?.ref,
+  });
+  const resources = [
+    audio,
+    ...(cover ? [cover.resource] : []),
+    trackPublishResource(track, input.publisherName),
+  ];
+  const result = await publishMultipleResources(resources);
+  if (
+    resources.some(
+      (r) =>
+        !result.published.some(
+          (entry) =>
+            entry.resource.name === r.name &&
+            entry.resource.service === r.service &&
+            entry.resource.identifier === r.identifier &&
+            !!entry.transactionSignature,
+        ),
+    )
+  )
+    throw new Error(
+      `Track publication was not fully confirmed. ${result.failures[0]?.error ?? 'Check saved resources before publishing again.'}`,
+    );
+  upsertTrackLocally(track);
+  return track;
 }

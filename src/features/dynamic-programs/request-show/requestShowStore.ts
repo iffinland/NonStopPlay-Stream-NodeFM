@@ -657,3 +657,16 @@ export function resetRequestShowStore(): void {
   requestShowEpoch += 1;
   notify();
 }
+
+/** Update the local view only after the complete program batch was confirmed. */
+export function acceptPublishedRequestShowOccurrences(
+  occurrences: readonly DynamicProgramOccurrence[],
+) {
+  if (!occurrences.length) return;
+  const ids = new Set(occurrences.map((occurrence) => occurrence.scheduleEventId));
+  requestShowOccurrences = [
+    ...requestShowOccurrences.filter((occurrence) => !ids.has(occurrence.scheduleEventId)),
+    ...occurrences,
+  ];
+  notify();
+}

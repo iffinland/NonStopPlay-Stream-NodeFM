@@ -130,7 +130,7 @@ export function useScheduler(): UseSchedulerResult {
 
   const throwIfNoName = useCallback(() => {
     if (!publisherName || !ownerAddress) {
-      throw new Error('A registered Qortium name is required.');
+      throw new Error('A registered Qortal name is required.');
     }
   }, [ownerAddress, publisherName]);
 

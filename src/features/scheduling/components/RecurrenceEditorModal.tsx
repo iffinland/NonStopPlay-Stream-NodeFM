@@ -1,3 +1,4 @@
+import { ProgramPeriodDialog } from './ProgramPeriodDialog';
 import { Spinner } from '../../../components/Spinner';
 /* ============================================================
  * NodeFM Station — Recurrence Editor Modal
@@ -15,10 +16,10 @@ import { usePlaylists } from '../../../hooks/usePlaylists';
 import { useLibrary } from '../../../hooks/useLibrary';
 import { useLikes } from '../../likes/useLikes';
 import { useRequestShow } from '../../dynamic-programs/request-show/useRequestShow';
-import { materializeRequestShowOccurrenceBatchAction } from '../../dynamic-programs/request-show/requestShowStore';
-import { useScheduler } from '../hooks/useScheduler';
-import { ScheduleBatchPartialError } from '../services/scheduleStore';
-import { compileScheduleRecurrence } from '../services/recurrenceCompiler';
+import { saveRecurringProgramAction } from '../services/scheduleStore';
+import { compileScheduleRecurrence, recurrencePeriodEnd } from '../services/recurrenceCompiler';
+import { createScheduleRecurrence } from '../services/scheduleService';
+import { formatZonedDateInput } from '../services/timezone';
 import { getNowUtcMs } from '../../radio/timeline';
 import type { ScheduleRecurrence, Track } from '../../../types/domain';
 import { isValidDurationMs } from '../../../utils/duration';
@@ -61,9 +62,8 @@ function rankFromAggregates(
 
 export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceEditorModalProps) {
   const { station } = useStation();
-  const { publisherName } = useStationIdentity();
+  const { publisherName, ownerAddress } = useStationIdentity();
   const { playlists, getVersions } = usePlaylists();
-  const { createRecurrence, updateRecurrence } = useScheduler();
   const { tracks: libraryTracks, loaded: libraryLoaded, loading: libraryLoading } = useLibrary();
   const { definitions, loaded: requestShowLoaded, loading: requestShowLoading } = useRequestShow();
   const timeZone = station?.timezone ?? '';
@@ -74,6 +74,7 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
   const [durationMinutes, setDurationMinutes] = useState(30);
   const [activeFrom, setActiveFrom] = useState('');
   const [activeUntil, setActiveUntil] = useState('');
+  const [reviewing, setReviewing] = useState(false);
   const [daysOfWeek, setDaysOfWeek] = useState<number[]>([]);
   const [sourceType, setSourceType] = useState<'playlist' | 'dynamic-program'>('playlist');
   const [playlistId, setPlaylistId] = useState('');
@@ -123,14 +124,7 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
       return;
     }
 
-    setActiveFrom(
-      new Intl.DateTimeFormat('en-CA', {
-        timeZone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      }).format(new Date()),
-    );
+    setActiveFrom(formatZonedDateInput(Date.now(), timeZone));
     setDaysOfWeek([]);
     setSourceType('playlist');
     setPlaylistId('');
@@ -149,7 +143,7 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
     );
   };
 
-  const materializeDynamicProgram = async (savedRecurrence: ScheduleRecurrence) => {
+  const requestShowPlan = () => {
     const definition = definitions.find(
       (candidate) => candidate.programDefinitionId === programDefinitionId,
     );
@@ -159,7 +153,7 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
     }
 
     if (!publisherName) {
-      throw new Error('A registered Qortium name is required to materialize Request Show.');
+      throw new Error('A registered Qortal name is required to materialize Request Show.');
     }
 
     if (!libraryLoaded) {
@@ -174,30 +168,58 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
       throw new Error('Like records are not ready. Wait for Like loading to finish.');
     }
 
-    const compiled = compileScheduleRecurrence(savedRecurrence, getNowUtcMs());
-    if (!compiled.ok) {
-      throw new Error(compiled.errors.join(' '));
-    }
-
-    const occurrenceBatch = await materializeRequestShowOccurrenceBatchAction(
-      compiled.events,
+    return {
       definition,
-      eligibleTracks,
-      rankFromAggregates(eligibleTracks, aggregates),
-      new Date().toISOString(),
-      publisherName,
-      { reuseExisting: mode === 'create' },
-    );
-
-    if (occurrenceBatch.status !== 'all-published') {
-      const failed = occurrenceBatch.failedScheduleEventIds.join(', ');
-      throw new Error(
-        `Request Show lineups were partially published. Failed events: ${failed || 'all'}.`,
-      );
-    }
+      tracks: eligibleTracks,
+      ranking: rankFromAggregates(eligibleTracks, aggregates),
+    };
   };
 
-  const handleSave = async () => {
+  const selectedUntil = useMemo(() => {
+    if (activeUntil) return activeUntil;
+    try {
+      return recurrencePeriodEnd(activeFrom);
+    } catch {
+      return '';
+    }
+  }, [activeFrom, activeUntil]);
+  const preview = useMemo(() => {
+    if (!timeZone || !activeFrom || !selectedUntil) return null;
+    try {
+      return compileScheduleRecurrence(
+        createScheduleRecurrence({
+          ownerAddress: ownerAddress ?? 'preview',
+          title: title.trim() || 'Program',
+          timezone: timeZone,
+          frequency,
+          localStartTime: startTime,
+          durationMs: Math.round(durationMinutes * 60000),
+          daysOfWeek: frequency === 'weekly' ? daysOfWeek : undefined,
+          activeFromLocalDate: activeFrom,
+          activeUntilLocalDate: selectedUntil,
+          source: { type: 'playlist', playlistId: 'preview', playlistVersionId: 'preview' },
+        }),
+        getNowUtcMs(),
+      );
+    } catch (err) {
+      return {
+        ok: false as const,
+        errors: [err instanceof Error ? err.message : 'Invalid period.'],
+      };
+    }
+  }, [
+    timeZone,
+    activeFrom,
+    selectedUntil,
+    ownerAddress,
+    title,
+    frequency,
+    startTime,
+    durationMinutes,
+    daysOfWeek,
+  ]);
+
+  const handleSave = async (confirmedEnd?: string) => {
     if (writeStartedRef.current) return;
 
     if (!timeZone) {
@@ -225,8 +247,21 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
       return;
     }
 
+    if (!publisherName || !ownerAddress || !preview?.ok || !preview.events.length) {
+      setError(
+        preview && !preview.ok ? preview.errors.join(' ') : 'Choose a period with future programs.',
+      );
+      return;
+    }
+    if (!confirmedEnd) {
+      setError(null);
+      setReviewing(true);
+      return;
+    }
     try {
+      const plan = sourceType === 'dynamic-program' ? requestShowPlan() : undefined;
       const input = {
+        ownerAddress,
         title: title.trim(),
         source:
           sourceType === 'playlist'
@@ -238,7 +273,7 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
         durationMs: Math.round(durationMinutes * 60_000),
         daysOfWeek: frequency === 'weekly' ? daysOfWeek : undefined,
         activeFromLocalDate: activeFrom,
-        activeUntilLocalDate: activeUntil || undefined,
+        activeUntilLocalDate: confirmedEnd,
       };
 
       writeStartedRef.current = true;
@@ -246,34 +281,52 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
       setSaving(true);
       setError(null);
 
-      const savedRecurrence =
-        mode === 'create'
-          ? await createRecurrence(input)
-          : recurrence
-            ? await updateRecurrence(recurrence.recurrenceId, input)
-            : null;
-
-      if (sourceType === 'dynamic-program' && savedRecurrence) {
-        await materializeDynamicProgram(savedRecurrence);
-      }
+      await saveRecurringProgramAction(
+        input,
+        publisherName,
+        getNowUtcMs(),
+        mode === 'edit' ? recurrence?.recurrenceId : undefined,
+        plan,
+      );
 
       onClose();
     } catch (saveError) {
-      if (saveError instanceof ScheduleBatchPartialError) {
-        const failed = saveError.result.batch.failedEvents.map((event) => event.eventId).join(', ');
-        setError(`${saveError.message}${failed ? ` Failed event IDs: ${failed}.` : ''}`);
-      } else {
-        setError(saveError instanceof Error ? saveError.message : 'Failed to save recurrence.');
-      }
+      setReviewing(false);
+      setError(saveError instanceof Error ? saveError.message : 'Failed to save recurrence.');
     } finally {
       setSaving(false);
     }
   };
 
+  if (reviewing)
+    return (
+      <ProgramPeriodDialog
+        input={{
+          ownerAddress: ownerAddress ?? '',
+          title: title.trim(),
+          source:
+            sourceType === 'playlist'
+              ? { type: 'playlist', playlistId, playlistVersionId: versionId }
+              : { type: 'dynamic-program', programDefinitionId },
+          timezone: timeZone,
+          frequency,
+          localStartTime: startTime,
+          durationMs: Math.round(durationMinutes * 60000),
+          daysOfWeek: frequency === 'weekly' ? daysOfWeek : undefined,
+          activeFromLocalDate: activeFrom,
+        }}
+        endDate={activeUntil || undefined}
+        busy={saving}
+        onBack={() => setReviewing(false)}
+        onConfirm={(until) => void handleSave(until)}
+      />
+    );
+
   return (
     <Modal
       title={mode === 'create' ? 'New Recurring Program' : 'Edit Recurring Program'}
-      onClose={onClose}
+      busy={saving}
+      onClose={saving ? () => undefined : onClose}
       wide
     >
       <div className="recurrence-editor">
@@ -333,6 +386,7 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
           <label className="form-field">
             Start time ({timeZone || 'station timezone'})
             <UtcTimeInput
+              ariaLabel={`Start time (${timeZone || 'station timezone'})`}
               value={startTime}
               onChange={setStartTime}
               suffix={timeZone || 'station timezone'}
@@ -352,7 +406,7 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
 
         <div className="schedule-editor__time-row">
           <label className="form-field">
-            Active from
+            Start date
             <input
               type="date"
               value={activeFrom}
@@ -360,11 +414,12 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
             />
           </label>
           <label className="form-field">
-            Active until (optional)
+            End date (optional)
             <input
               type="date"
               value={activeUntil}
-              onChange={(changeEvent) => setActiveUntil(changeEvent.target.value)}
+              min={activeFrom}
+              onChange={(event) => setActiveUntil(event.target.value)}
             />
           </label>
         </div>
@@ -423,8 +478,11 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
         )}
 
         <p className="recurrence-editor__hint">
-          The next 8 weeks are compiled into concrete UTC schedule events. Runtime never evaluates
-          recurrence rules.
+          {preview?.ok
+            ? `${preview.events.length} programs · ${activeFrom} – ${selectedUntil}.`
+            : 'Choose a valid publication period (up to 12 months).'}{' '}
+          The complete program is submitted in one Hub batch approval. It stops at the end of this
+          period; extension is manual.
         </p>
 
         {error && <p className="form-error">{error}</p>}
@@ -444,12 +502,14 @@ export function RecurrenceEditorModal({ mode, recurrence, onClose }: RecurrenceE
           <button
             className="button button--primary"
             type="button"
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             disabled={
               saving ||
               writeStarted ||
               !timeZone ||
               !title.trim() ||
+              !preview?.ok ||
+              (preview.ok && !preview.events.length) ||
               (sourceType === 'playlist' && (!playlistId || !versionId)) ||
               (sourceType === 'dynamic-program' &&
                 (!programDefinitionId || !libraryLoaded || !requestShowLoaded || !likesReady))

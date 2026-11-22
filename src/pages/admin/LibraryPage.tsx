@@ -1,3 +1,4 @@
+import { useAuth } from '../../app/providers/authContext';
 /* ============================================================
  * NodeFM Station — Library Page (Admin)
  *
@@ -57,7 +58,11 @@ export default function LibraryPage() {
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [transaction, setTransaction] = useState<QdnTransactionState | null>(null);
   const { ownerAddress, publisherName } = useStationIdentity();
-  const bulkScope = ownerAddress ?? publisherName ?? '';
+  const { auth } = useAuth();
+  const bulkScope =
+    auth.status === 'authenticated' && auth.address !== ownerAddress
+      ? `${ownerAddress ?? publisherName}:${auth.address}`
+      : (ownerAddress ?? publisherName ?? '');
 
   useEffect(() => {
     if (libraryAction === 'upload') {
@@ -303,7 +308,8 @@ export default function LibraryPage() {
             scope={bulkScope}
             showHeader={false}
             actorName={publisherName}
-            actorAddress={ownerAddress}
+            actorAddress={auth.status === 'authenticated' ? auth.address : null}
+            stationOwnerAddress={ownerAddress}
           />
         </Modal>
       )}

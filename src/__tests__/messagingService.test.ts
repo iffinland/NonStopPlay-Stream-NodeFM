@@ -26,7 +26,7 @@ describe('messaging service', () => {
   it('builds the exact SEND_CHAT_MESSAGE request shape', () => {
     expect(buildDirectMessageRequest('Q-owner', 'Hello')).toEqual({
       action: 'SEND_CHAT_MESSAGE',
-      recipientAddress: 'Q-owner',
+      destinationAddress: 'Q-owner',
       message: 'Hello',
     });
   });
@@ -34,10 +34,9 @@ describe('messaging service', () => {
   it('sends a valid station message exactly once', async () => {
     mockedSend.mockImplementation(
       withUnlockedTestAccount(async () => ({
-        accepted: true,
-        direct: true,
-        encrypted: true,
-        recipientAddress: 'Q-owner',
+        signature: 'chat-tx',
+        recipient: 'Q-owner',
+        isEncrypted: true,
       })),
     );
 
@@ -52,7 +51,7 @@ describe('messaging service', () => {
     ).toHaveLength(1);
     expect(mockedSend).toHaveBeenCalledWith({
       action: 'SEND_CHAT_MESSAGE',
-      recipientAddress: 'Q-owner',
+      destinationAddress: 'Q-owner',
       message: 'Hello station',
     });
   });

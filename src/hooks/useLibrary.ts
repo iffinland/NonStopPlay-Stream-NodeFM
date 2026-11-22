@@ -120,7 +120,7 @@ export function useLibrary(options: { loadOnMount?: boolean } = {}): UseLibraryR
   const removeTrack = useCallback(
     async (trackId: string) => {
       if (!publisherName) {
-        throw new Error('A registered Qortium name is required.');
+        throw new Error('A registered Qortal name is required.');
       }
 
       await removeTrackFromLibrary(trackId, publisherName);
@@ -138,17 +138,17 @@ export function useLibrary(options: { loadOnMount?: boolean } = {}): UseLibraryR
     addTrack: publisherName
       ? (track: Track) => addTrackToLibrary(track, publisherName)
       : async () => {
-          throw new Error('A registered Qortium name is required.');
+          throw new Error('A registered Qortal name is required.');
         },
     createTrack: publisherName
       ? (input: CreateTrackInput) => createAndAddTrack(input, publisherName)
       : async () => {
-          throw new Error('A registered Qortium name is required.');
+          throw new Error('A registered Qortal name is required.');
         },
     editTrack: publisherName
       ? (trackId: string, input: EditTrackInput) => updateTrack(trackId, input, publisherName)
       : async () => {
-          throw new Error('A registered Qortium name is required.');
+          throw new Error('A registered Qortal name is required.');
         },
     removeTrack,
     getTrack: getTrackById,

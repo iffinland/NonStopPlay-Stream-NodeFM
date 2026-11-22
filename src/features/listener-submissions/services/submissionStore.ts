@@ -1,3 +1,4 @@
+import { assertStationManager } from '../../collaboration/collaborationService';
 /* ============================================================
  * NodeFM Station — Listener Track Submission Store
  *
@@ -258,7 +259,7 @@ export async function publishListenerSubmission(
   if (!input.submitterName.trim()) {
     return {
       status: 'failed',
-      reason: 'A registered Qortium name is required to publish a submission.',
+      reason: 'A registered Qortal name is required to publish a submission.',
     };
   }
 
@@ -371,40 +372,8 @@ export async function publishListenerSubmission(
       }
     : undefined;
 
-  try {
-    const mediaResources = coverResource ? [audioResource, coverResource] : [audioResource];
-    const mediaResponse = await publishMultipleResources(mediaResources);
-    const audioPublished =
-      mediaResponse.accepted &&
-      mediaResponse.published.some((entry) => entry.resource.identifier === audioIdentifier);
-
-    if (!audioPublished) {
-      return {
-        status: 'failed',
-        reason:
-          mediaResponse.failures.find((entry) => entry.resource.identifier === audioIdentifier)
-            ?.error ?? 'Audio publication was not accepted.',
-      };
-    }
-
-    if (coverResource && coverIdentifier) {
-      const coverPublished = mediaResponse.published.some(
-        (entry) => entry.resource.identifier === coverIdentifier,
-      );
-      if (coverPublished) {
-        coverRef = {
-          service: 'IMAGE',
-          name: input.submitterName.trim(),
-          identifier: coverIdentifier,
-        };
-      }
-    }
-  } catch (publishError) {
-    return {
-      status: 'failed',
-      reason: publishError instanceof Error ? publishError.message : 'Audio publication failed.',
-    };
-  }
+  if (coverIdentifier)
+    coverRef = { service: 'IMAGE', name: input.submitterName.trim(), identifier: coverIdentifier };
 
   const submissionDraft = createListenerTrackSubmission({
     submissionId: input.submissionId,
@@ -424,31 +393,50 @@ export async function publishListenerSubmission(
 
   try {
     const submissionIdentifier = getSubmissionQdnIdentifier(input.submissionId);
-    const submissionResult = await publishResource({
-      service: SUBMISSION_QDN_SERVICE,
-      name: input.submitterName.trim(),
-      identifier: submissionIdentifier,
-      bytesBase64: btoa(unescape(encodeURIComponent(serializeSubmissionForQdn(submissionDraft)))),
-      fileName: qdnJsonPublishFileName(submissionIdentifier),
-      mimeType: 'application/json',
-      title: submissionDraft.title,
-      description: submissionDraft.description,
-      tags: submissionDraft.tags,
-    });
-
-    if (!submissionResult.accepted) {
-      throw new Error('Submission metadata publication was not accepted.');
+    const resources: PublishMultipleResource[] = [
+      audioResource,
+      ...(coverResource ? [coverResource] : []),
+      {
+        service: SUBMISSION_QDN_SERVICE,
+        name: input.submitterName.trim(),
+        identifier: submissionIdentifier,
+        bytesBase64: btoa(unescape(encodeURIComponent(serializeSubmissionForQdn(submissionDraft)))),
+        fileName: qdnJsonPublishFileName(submissionIdentifier),
+        mimeType: 'application/json',
+        title: submissionDraft.title,
+        description: submissionDraft.description,
+        tags: submissionDraft.tags,
+      },
+    ];
+    const result = await publishMultipleResources(resources);
+    const confirmed = (resource: PublishMultipleResource) =>
+      result.published.some(
+        (entry) =>
+          entry.resource.name === resource.name &&
+          entry.resource.service === resource.service &&
+          entry.resource.identifier === resource.identifier &&
+          !!entry.transactionSignature,
+      );
+    if (resources.some((resource) => !confirmed(resource))) {
+      const reason =
+        result.failures[0]?.error ??
+        'Submission was not fully confirmed. Check saved resources before publishing again.';
+      if (!confirmed(audioResource)) return { status: 'failed', reason };
+      return {
+        status: 'partial',
+        reason,
+        audio: audioRef,
+        cover: coverResource && confirmed(coverResource) ? coverRef : undefined,
+        submissionDraft,
+      };
     }
-  } catch (metadataError) {
+  } catch (error) {
     return {
-      status: 'partial',
+      status: 'failed',
       reason:
-        metadataError instanceof Error
-          ? metadataError.message
-          : 'Submission metadata publication failed.',
-      audio: audioRef,
-      cover: coverRef,
-      submissionDraft,
+        error instanceof Error
+          ? error.message
+          : 'Submission was not confirmed. Check saved resources before publishing again.',
     };
   }
 
@@ -632,7 +620,7 @@ async function loadReviewRecordsInternal(
         diagnostic(
           'IDENTITY_UNVERIFIED',
           identifier,
-          'Submission submitterAddress does not match the verified Qortium name owner.',
+          'Submission submitterAddress does not match the verified Qortal name owner.',
         ),
       );
       continue;
@@ -813,10 +801,8 @@ export async function refreshListenerSubmissions(
 
 // ── Owner moderation ───────────────────────────────────────────────
 
-function assertOwner(actorAddress: string | null, ownerAddress: string): void {
-  if (!actorAddress || !ownerAddress || actorAddress !== ownerAddress) {
-    throw new Error('Only the station owner can moderate listener submissions.');
-  }
+async function assertOwner(actorAddress: string | null, ownerAddress: string): Promise<void> {
+  await assertStationManager(actorAddress, ownerAddress);
 }
 
 function submissionScopeKey(stationPublisherName: string, ownerAddress: string): string {
@@ -867,7 +853,7 @@ export async function acceptSubmission(
   actorAddress: string | null,
   ownerAddress: string,
 ): Promise<AcceptSubmissionResult> {
-  assertOwner(actorAddress, ownerAddress);
+  await assertOwner(actorAddress, ownerAddress);
   const moderationScope = submissionScopeKey(stationPublisherName, ownerAddress);
 
   if (scope !== moderationScope) {
@@ -1012,7 +998,7 @@ export async function rejectSubmission(
   ownerAddress: string,
   reason?: string,
 ): Promise<SubmissionModeration> {
-  assertOwner(actorAddress, ownerAddress);
+  await assertOwner(actorAddress, ownerAddress);
   const moderationScope = submissionScopeKey(stationPublisherName, ownerAddress);
 
   if (scope !== moderationScope) {

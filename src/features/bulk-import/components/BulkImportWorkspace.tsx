@@ -69,6 +69,7 @@ type BulkImportWorkspaceProps = {
   showHeader?: boolean;
   actorName?: string | null;
   actorAddress?: string | null;
+  stationOwnerAddress?: string | null;
 };
 
 type AnalysisEntry = { rowId: string; file: File };
@@ -90,6 +91,7 @@ function BulkImportWorkspaceInner({
   showHeader = true,
   actorName = null,
   actorAddress = null,
+  stationOwnerAddress = null,
 }: BulkImportWorkspaceProps) {
   const [batch, setBatch] = useState<BulkImportBatch>(
     () => loadBulkImportBatch(role, scope) ?? createBulkImportBatch(role, scope),
@@ -607,6 +609,7 @@ function BulkImportWorkspaceInner({
         },
         actorName: actorName ?? '',
         actorAddress: actorAddress ?? '',
+        stationOwnerAddress: stationOwnerAddress ?? undefined,
         getSource: (row, kind) => {
           const entry = getTransientEntry(
             transientRegistryRef.current,

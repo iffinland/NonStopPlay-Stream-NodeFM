@@ -1,3 +1,4 @@
+import { useAuth } from '../../app/providers/authContext';
 /* ============================================================
  * NodeFM Station — useNotices Hook
  *
@@ -35,12 +36,15 @@ export type UseNoticesResult = {
 };
 
 export function useNotices(): UseNoticesResult {
-  const { publisherName, station, isOwner } = useStation();
+  const { publisherName, station, isOwner: owner, canManage } = useStation();
 
   const [loaded, setLoaded] = useState(getNoticeLoaded());
   const [loading, setLoading] = useState(getNoticeLoading());
   const [error, setError] = useState<string | null>(getNoticeError());
   const [incomplete, setIncomplete] = useState(getNoticeIncomplete());
+  const isOwner = canManage ?? owner;
+  const { auth } = useAuth();
+  const actorAddress = auth.status === 'authenticated' ? auth.address : null;
   const [diagnosticsCount, setDiagnosticsCount] = useState(getNoticeDiagnostics().length);
   const [revision, setRevision] = useState(0);
 
@@ -72,12 +76,12 @@ export function useNotices(): UseNoticesResult {
       }
 
       if (!publisherName) {
-        throw new Error('A registered Qortium name is required to manage station notices.');
+        throw new Error('A registered Qortal name is required to manage station notices.');
       }
 
-      return saveNotice(notice, publisherName, station.ownerAddress, station.ownerAddress);
+      return saveNotice(notice, publisherName, actorAddress, station.ownerAddress);
     },
-    [isOwner, publisherName, station?.ownerAddress],
+    [isOwner, publisherName, station?.ownerAddress, actorAddress],
   );
 
   const handleDeleteNotice = useCallback(
@@ -87,12 +91,12 @@ export function useNotices(): UseNoticesResult {
       }
 
       if (!publisherName) {
-        throw new Error('A registered Qortium name is required to manage station notices.');
+        throw new Error('A registered Qortal name is required to manage station notices.');
       }
 
-      await deleteNotice(noticeId, publisherName, station.ownerAddress, station.ownerAddress);
+      await deleteNotice(noticeId, publisherName, actorAddress, station.ownerAddress);
     },
-    [isOwner, publisherName, station?.ownerAddress],
+    [isOwner, publisherName, station?.ownerAddress, actorAddress],
   );
 
   void revision;

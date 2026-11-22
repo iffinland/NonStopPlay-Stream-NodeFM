@@ -1,7 +1,7 @@
 /* ============================================================
  * NodeFM Station — My Playlists Page
  *
- * Listener-owned playlist browser. A registered Qortium name is
+ * Listener-owned playlist browser. A registered Qortal name is
  * mandatory; the page deliberately shows an honest blocked state
  * instead of creating unnamed drafts.
  * ============================================================ */
@@ -92,7 +92,7 @@ export default function MyPlaylistsPage() {
   if (auth.status === 'loading') {
     return (
       <PageShell title="My Playlists">
-        <LoadingState message="Checking Qortium identity…" />
+        <LoadingState message="Checking Qortal identity…" />
       </PageShell>
     );
   }

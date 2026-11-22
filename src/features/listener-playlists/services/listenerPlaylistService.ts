@@ -179,7 +179,7 @@ export function createListenerPlaylistDraft(
   input: CreateListenerPlaylistDraftInput,
 ): ListenerPlaylistDraft {
   if (!isNonEmptyTrimmedString(input.ownerName)) {
-    throw new Error('A registered Qortium name is required to create a listener playlist.');
+    throw new Error('A registered Qortal name is required to create a listener playlist.');
   }
 
   if (!isNonEmptyTrimmedString(input.ownerAddress)) {

@@ -53,12 +53,15 @@ export async function searchQdnResources(params: QdnSearchParams): Promise<QdnRe
   };
 
   if (params.service) payload.service = params.service;
-  if (params.name) payload.name = params.name;
+  if (params.name) {
+    payload.name = params.name;
+    payload.exactMatchNames = params.exactMatchNames ?? true;
+  }
   if (params.query) payload.query = params.query;
   if (params.includeMetadata) payload.includeMetadata = true;
   if (params.includeStatus) payload.includeStatus = true;
   if (params.prefix) payload.prefix = true;
-  if (params.exactMatchNames) payload.exactMatchNames = true;
+  if (params.exactMatchNames !== undefined) payload.exactMatchNames = params.exactMatchNames;
 
   return sendBridgeRequest(payload) as Promise<QdnResourceInfo[]>;
 }

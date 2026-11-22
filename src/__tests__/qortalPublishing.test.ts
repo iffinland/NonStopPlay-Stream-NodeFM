@@ -171,7 +171,7 @@ describe('Qortal Hub publication contract', () => {
       wire.mock.calls.filter(([request]) => request.action === 'PUBLISH_MULTIPLE_QDN_RESOURCES'),
     ).toHaveLength(1);
   });
-  it('keeps earlier chunk successes if the wallet changes before the next chunk', async () => {
+  it('submits more than ten resources in one approval without later chunk prompts', async () => {
     let batches = 0;
     wire.mockImplementation(async (request) => {
       if (request.action === 'GET_USER_ACCOUNT')
@@ -186,8 +186,29 @@ describe('Qortal Hub publication contract', () => {
     const result = await publishMultipleResources(
       Array.from({ length: 11 }, (_, i) => ({ ...input, identifier: `audio-${i}` })),
     );
-    expect(result.published).toHaveLength(10);
-    expect(result.failures).toHaveLength(1);
+    expect(result.published).toHaveLength(11);
+    expect(result.failures).toHaveLength(0);
     expect(batches).toBe(1);
   });
+});
+
+it('rejects an oversized complete action before the first permission or publish call', async () => {
+  wire.mockClear();
+  await expect(
+    publishMultipleResources(
+      Array.from({ length: 1001 }, (_, i) => ({ ...input, identifier: `audio-${i}` })),
+    ),
+  ).rejects.toThrow(/1,000-resource/);
+  expect(wire).not.toHaveBeenCalled();
+});
+it('blocks an account change before the only batch is dispatched', async () => {
+  let reads = 0;
+  wire.mockImplementation(async (request) => {
+    if (request.action === 'GET_USER_ACCOUNT')
+      return { address: ++reads === 1 ? 'Q-owner' : 'Q-other' };
+    if (request.action === 'GET_NAME_DATA') return { owner: 'Q-owner' };
+    throw new Error('No signing expected');
+  });
+  await expect(publishMultipleResources([input])).rejects.toThrow(/changed/);
+  expect(wire.mock.calls.some(([p]) => p.action === 'PUBLISH_MULTIPLE_QDN_RESOURCES')).toBe(false);
 });

@@ -5,7 +5,7 @@
  * logical playlists and immutable playlist versions. It reuses the
  * same domain entities and serialization rules as station playlists,
  * but discovery and publication are keyed to the listener's selected
- * registered Qortium name, never the NodeFM station publisher.
+ * registered Qortal name, never the NodeFM station publisher.
  * ============================================================ */
 
 import type { Playlist, PlaylistVersion, PlaylistVersionTrack } from '../../../types/domain';
@@ -403,7 +403,7 @@ export async function publishListenerPlaylist(
   if (!draft.ownerName.trim()) {
     return {
       ok: false,
-      error: 'A registered Qortium name is required to publish a listener playlist.',
+      error: 'A registered Qortal name is required to publish a listener playlist.',
       invalidTrackIds: [],
     };
   }

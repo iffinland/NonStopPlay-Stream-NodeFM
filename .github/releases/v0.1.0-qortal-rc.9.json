@@ -1,0 +1,11 @@
+{
+  "version": "0.1.0-qortal-rc.9",
+  "tag": "v0.1.0-qortal-rc.9",
+  "title": "NodeFM for Qortal — 0.1.0-qortal-rc.9",
+  "runtime_accepted": true,
+  "accepted_on": "2026-11-22",
+  "runtime_path": ".github/releases/NodeFM_0.1.0-qortal-rc.9.zip",
+  "runtime_sha256": "986af493a63b170d009908efcaf7456c4fd3f7b90765b622895cd5b398259d22",
+  "notes_path": "docs/RELEASE-NOTES-RC9.md",
+  "prerelease": false
+}

@@ -18,7 +18,7 @@ import { useNotices } from '../useNotices';
 import { NoticeEditorModal } from './NoticeEditorModal';
 
 export function NoticeAdminPanel() {
-  const { isOwner } = useStation();
+  const { isOwner, canManage } = useStation();
   const { notices, loading, error, incomplete, refresh, saveNotice, deleteNotice } = useNotices();
 
   const [editingNotice, setEditingNotice] = useState<StationNotice | null | undefined>(undefined);
@@ -26,7 +26,7 @@ export function NoticeAdminPanel() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [transaction, setTransaction] = useState<QdnTransactionState | null>(null);
 
-  if (!isOwner) {
+  if (!(canManage ?? isOwner)) {
     return null;
   }
 

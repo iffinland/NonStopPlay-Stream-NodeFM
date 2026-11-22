@@ -1,5 +1,11 @@
 # Qortal phase 2 — publication and station bootstrap
 
+**Release acceptance, 2026-11-22:** the owner confirmed RC.9 runtime and all tests passed, and authorized main/tag/release publication. Earlier candidate/pending statements below describe their historical checkpoints and are superseded by the [accepted release](../reports/QORTAL-RC9-ACCEPTANCE.md).
+
+Historical phase checkpoint. Current state: RC.6 runtime accepted; RC.7
+implements remaining phases 3–4 and awaits combined native acceptance. See
+[phases 3–4](QORTAL-PHASE3-4.md).
+
 Version: `0.1.0-qortal-rc.5`, 2026-11-22. RC.2 authentication/Admin was passed
 by the owner. The owner passed RC.5 bulk/library runtime tests. The same-version
 progress and preview addendum also passed owner runtime testing. See the

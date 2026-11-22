@@ -7,6 +7,7 @@ import {
 } from './accountWriteGate';
 import { resolveQdnPublishFilename } from './publishFilename';
 import { pickPublishFile } from './filePicker';
+import { usesStationDocumentManifest } from './stationAccess';
 
 export type QdnPublishSourceInput = {
   file?: Blob;
@@ -22,6 +23,8 @@ export type PublishInput = QdnPublishSourceInput & {
   description?: string;
   category?: string;
   tags?: string[];
+  /** Internal station removal, represented by a DOCUMENT manifest marker. */
+  remove?: true;
 };
 export type PublishMultipleResource = PublishInput;
 export type MultiplePublishResourceCoordinate = {
@@ -62,7 +65,8 @@ export type QdnPublishCapability = {
   publishMultiple: boolean;
   advertisedActions: readonly string[] | null;
 };
-export const QDN_PUBLISH_BATCH_MAX_ITEMS = 10;
+// One user action maps to one Hub approval; never silently split it into dialogs.
+export const QDN_PUBLISH_BATCH_MAX_ITEMS = 1000;
 export const QORTAL_JSON_MAX_BYTES = 25 * 1024;
 export class QdnPublishSourceUnsupportedError extends Error {}
 export class QdnPublicationUnknownError extends Error {
@@ -99,6 +103,7 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 function rejection(error: unknown): boolean {
+  if (record(error) && error.code === 'PUBLICATION_UNKNOWN') return false;
   return /declin|cancel|reject|insufficient|invalid (data|name|identifier|service)|not enough|does not own/i.test(
     message(error),
   );
@@ -138,6 +143,18 @@ function bytesOfBase64(value: string): Uint8Array {
 async function prepare(input: PublishInput): Promise<Record<string, unknown>> {
   if (!input.name.trim() || !input.service.trim())
     throw new Error('A publishing name and service are required.');
+  if (input.remove) {
+    if (input.file || input.bytesBase64)
+      throw new Error('Removal cannot include publication data.');
+    if (!usesStationDocumentManifest(input.service, input.name, input.identifier))
+      throw new Error('Removal is available only for managed station resources.');
+    return {
+      service: input.service,
+      name: input.name,
+      identifier: input.identifier,
+      nodefmRemove: true,
+    };
+  }
   if (input.file && input.bytesBase64) throw new Error('Provide one publish source per resource.');
   const forbidden = ['sourceToken', 'sourceHandle', 'path', 'filePath', 'fee', 'data64', 'base64'];
   for (const key of forbidden)
@@ -155,7 +172,10 @@ async function prepare(input: PublishInput): Promise<Record<string, unknown>> {
   } else throw new Error('Select a local file before publishing.');
   if (size <= 0) throw new Error('The publish source is empty.');
   if (input.service === 'JSON') {
-    if (size > QORTAL_JSON_MAX_BYTES)
+    if (
+      size > QORTAL_JSON_MAX_BYTES &&
+      !usesStationDocumentManifest(input.service, input.name, input.identifier)
+    )
       throw new Error(
         'Qortal JSON resources cannot exceed 25 KiB. Split this record before publishing.',
       );
@@ -220,6 +240,10 @@ export async function publishMultipleResources(
 ): Promise<MultiplePublishResult> {
   if (!resources.length)
     throw new Error('At least one resource is required for QDN batch publication.');
+  if (resources.length > QDN_PUBLISH_BATCH_MAX_ITEMS)
+    throw new QdnPublishPreflightError(
+      'This action exceeds the 1,000-resource batch limit. Choose a shorter period or fewer files.',
+    );
   const seen = new Set<string>();
   for (const item of resources) {
     const key = JSON.stringify(coordinate(item));

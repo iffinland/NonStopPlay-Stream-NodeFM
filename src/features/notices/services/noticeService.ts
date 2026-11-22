@@ -6,7 +6,7 @@
  *
  * A notice is a mutable owner-managed QDN JSON resource:
  *   service: JSON
- *   name: station publisher's registered Qortium name
+ *   name: station publisher's registered Qortal name
  *   identifier: nodefm-notice-<noticeId>
  * ============================================================ */
 

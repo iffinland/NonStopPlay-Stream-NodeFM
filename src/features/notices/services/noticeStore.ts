@@ -1,3 +1,4 @@
+import { assertStationManager } from '../../collaboration/collaborationService';
 /* ============================================================
  * NodeFM Station — Notice Store
  *
@@ -286,10 +287,8 @@ export async function refreshNotices(publisherName: string | null): Promise<void
   await loadNotices(publisherName, true);
 }
 
-function assertNoticeOwner(actorAddress: string | null, ownerAddress: string): void {
-  if (!actorAddress || !ownerAddress || actorAddress !== ownerAddress) {
-    throw new Error('Only the station owner can manage station notices.');
-  }
+async function assertNoticeOwner(actorAddress: string | null, ownerAddress: string): Promise<void> {
+  await assertStationManager(actorAddress, ownerAddress);
 }
 
 export async function saveNotice(
@@ -298,10 +297,10 @@ export async function saveNotice(
   actorAddress: string | null,
   ownerAddress: string,
 ): Promise<StationNotice> {
-  assertNoticeOwner(actorAddress, ownerAddress);
+  await assertNoticeOwner(actorAddress, ownerAddress);
 
   if (!publisherName.trim()) {
-    throw new Error('A registered Qortium name is required to publish a station notice.');
+    throw new Error('A registered Qortal name is required to publish a station notice.');
   }
 
   const identifier = getNoticeQdnIdentifier(notice.noticeId);
@@ -347,10 +346,10 @@ export async function deleteNotice(
   actorAddress: string | null,
   ownerAddress: string,
 ): Promise<void> {
-  assertNoticeOwner(actorAddress, ownerAddress);
+  await assertNoticeOwner(actorAddress, ownerAddress);
 
   if (!publisherName.trim()) {
-    throw new Error('A registered Qortium name is required to delete a station notice.');
+    throw new Error('A registered Qortal name is required to delete a station notice.');
   }
 
   const identifier = getNoticeQdnIdentifier(noticeId);

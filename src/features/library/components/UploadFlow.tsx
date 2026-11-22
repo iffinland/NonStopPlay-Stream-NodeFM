@@ -1,4 +1,4 @@
-/** Local file → verified duration → media approval → Track metadata approval. */
+/** Local file → verified duration → one complete publication approval. */
 
 import { useState, useCallback, useRef } from 'react';
 import { Modal } from '../../../components/Modal';
@@ -14,9 +14,9 @@ import {
   isValidReleaseDateValue,
 } from '../../metadata-intelligence';
 import { readCoverFile } from '../services/coverService';
-import { publishUploadMediaResources, publishUploadTrackMetadata } from '../services/uploadService';
+import { publishUploadTrackBundle } from '../services/uploadService';
 import { resolvePublishAudioDuration } from '../../../utils/localAudioDuration';
-import { createTrack, getAudioQdnIdentifier } from '../../tracks/services/trackService';
+import { getAudioQdnIdentifier } from '../../tracks/services/trackService';
 
 type Step = 'select' | 'metadata' | 'publishing' | 'resolving' | 'done' | 'error';
 
@@ -63,6 +63,7 @@ export function UploadFlow({
   const { ownerAddress, publisherName } = useStationIdentity();
   const { remember, genres: genreSuggestions, tags: tagSuggestions } = useTaxonomy();
   const coverInputRef = useRef<HTMLInputElement>(null);
+  const publishingRef = useRef(false);
   const [publication, setPublication] = useState<UploadPublicationState | null>(null);
 
   const [state, setState] = useState<UploadState>({
@@ -130,6 +131,7 @@ export function UploadFlow({
   // ── Publish ────────────────────────────────────────────────────
 
   const handlePublish = useCallback(async () => {
+    if (publishingRef.current) return;
     if (!state.audioSource || state.audioSource.canceled || !ownerAddress || !publisherName) return;
 
     if (state.releaseDate.trim() && !isValidReleaseDateValue(state.releaseDate)) {
@@ -149,6 +151,7 @@ export function UploadFlow({
       return;
     }
 
+    publishingRef.current = true;
     setState((s) => ({ ...s, step: 'publishing', error: null }));
     const hasCover = Boolean(state.coverFile && state.coverBase64);
     const trackTitle = state.title || state.audioSource.fileName.replace(/\.[^/.]+$/, '');
@@ -157,7 +160,7 @@ export function UploadFlow({
       ...(hasCover
         ? [{ id: 'cover' as const, label: 'Cover image', status: 'active' as const }]
         : []),
-      { id: 'track', label: 'Track metadata', status: 'waiting' },
+      { id: 'track', label: 'Track metadata', status: 'active' },
     ];
     setPublication({ phase: 'publishing', rows });
 
@@ -165,108 +168,41 @@ export function UploadFlow({
       const durationMs = await resolvePublishAudioDuration(state.audioSource.file);
       const audioIdentifier = getAudioQdnIdentifier();
 
-      // 1. One approval for AUDIO + optional cover IMAGE.
-      const mediaResult = await publishUploadMediaResources({
-        publisherName,
-        audioIdentifier,
-        audioFile: state.audioSource.file,
-        title: trackTitle,
-        cover:
-          state.coverFile && state.coverBase64
-            ? {
-                publisherName,
-                title: trackTitle,
-                file: state.coverFile,
-                bytesBase64: state.coverBase64.split(',')[1] ?? '',
-              }
-            : undefined,
-      });
-
-      const audioFailure = mediaResult.response.failures.find(
-        (entry) => entry.resource.identifier === audioIdentifier,
-      );
-      const coverFailure = mediaResult.coverRef
-        ? mediaResult.response.failures.find(
-            (entry) => entry.resource.identifier === mediaResult.coverRef?.identifier,
-          )
-        : undefined;
-
-      if (!mediaResult.audioPublished || (hasCover && !mediaResult.coverPublished)) {
-        const message =
-          audioFailure?.error ??
-          coverFailure?.error ??
-          'QDN batch publication returned an incomplete result.';
-
-        setPublication((current) =>
-          current
-            ? {
-                phase: 'failed',
-                rows: current.rows.map((row) => {
-                  if (row.id === 'audio' && !mediaResult.audioPublished) {
-                    return { ...row, status: 'failed' as const, error: audioFailure?.error };
-                  }
-                  if (row.id === 'cover' && hasCover && !mediaResult.coverPublished) {
-                    return { ...row, status: 'failed' as const, error: coverFailure?.error };
-                  }
-                  if (row.id === 'audio') return { ...row, status: 'succeeded' as const };
-                  if (row.id === 'cover' && hasCover) {
-                    return { ...row, status: 'succeeded' as const };
-                  }
-                  return row;
-                }),
-                error: message,
-              }
-            : current,
-        );
-        setState((s) => ({ ...s, step: 'error', error: message }));
-        return;
-      }
-
-      setPublication((current) =>
-        current
-          ? {
-              ...current,
-              rows: current.rows.map((row) => {
-                if (row.id === 'audio' || row.id === 'cover') {
-                  return { ...row, status: 'succeeded' as const, error: undefined };
-                }
-                if (row.id === 'track') {
-                  return { ...row, status: 'active' as const, error: undefined };
-                }
-                return row;
-              }),
-            }
-          : current,
-      );
-
-      // 3. Create and publish the Track metadata JSON in a second approval.
       const genres = state.genres.trim()
         ? getCanonicalTaxonomyValues(state.genres, genreSuggestions)
         : undefined;
       const tags = state.tags.trim()
         ? getCanonicalTaxonomyValues(state.tags, tagSuggestions)
         : undefined;
-
-      const track = createTrack({
-        title: trackTitle,
-        artist: state.artist || undefined,
-        album: state.album || undefined,
-        releaseDate: state.releaseDate || undefined,
-        description: state.description || undefined,
-        audio: {
-          service: 'AUDIO',
-          name: publisherName,
-          identifier: audioIdentifier,
+      await publishUploadTrackBundle(
+        {
+          publisherName,
+          audioIdentifier,
+          audioFile: state.audioSource.file,
+          title: trackTitle,
+          cover:
+            state.coverFile && state.coverBase64
+              ? {
+                  publisherName,
+                  title: trackTitle,
+                  file: state.coverFile,
+                  bytesBase64: state.coverBase64.split(',')[1] ?? '',
+                }
+              : undefined,
         },
-        cover: mediaResult.coverRef,
-        durationMs,
-        genres,
-        tags,
-        source: 'station-upload',
-        ownerAddress,
-      });
-
-      await publishUploadTrackMetadata(track, publisherName);
+        {
+          title: trackTitle,
+          artist: state.artist || undefined,
+          album: state.album || undefined,
+          releaseDate: state.releaseDate || undefined,
+          description: state.description || undefined,
+          durationMs,
+          genres,
+          tags,
+          source: 'station-upload',
+          ownerAddress,
+        },
+      );
 
       remember('genres', genres ?? []);
       remember('tags', tags ?? []);
@@ -337,7 +273,7 @@ export function UploadFlow({
   }
 
   return (
-    <Modal title="Upload Audio" onClose={onClose}>
+    <Modal title="Upload Audio" onClose={state.step === 'publishing' ? () => undefined : onClose}>
       <>
         {state.step === 'select' && (
           <div className="upload-flow__select">

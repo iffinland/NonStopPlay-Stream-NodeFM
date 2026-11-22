@@ -103,7 +103,7 @@ const otherAccount: AuthState = {
 };
 const unauthenticated: AuthState = { status: 'unauthenticated' };
 
-const loadingMessage = /Checking Qortium identity/;
+const loadingMessage = /Checking Qortal identity/;
 
 async function selectAudio() {
   await act(async () => {

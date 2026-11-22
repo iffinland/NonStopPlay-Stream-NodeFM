@@ -2,10 +2,11 @@
  * NodeFM Station — Admin Layout
  *
  * Admin layout with sidebar navigation.
- * Access is guarded by owner authorization check in AppRouter.
+ * AppRouter checks station management rights; membership is owner-only.
  * ============================================================ */
 
 import { Link, Outlet, useLocation } from 'react-router-dom';
+import { useStation } from '../features/station';
 
 const ADMIN_NAV = [
   { to: '/admin', label: 'Dashboard', isEnd: true },
@@ -19,6 +20,7 @@ const ADMIN_NAV = [
 
 export function AdminLayout() {
   const location = useLocation();
+  const { isOwner } = useStation();
 
   return (
     <div className="layout layout--admin">
@@ -29,6 +31,14 @@ export function AdminLayout() {
           </Link>
         </div>
         <nav className="admin__nav">
+          {isOwner && (
+            <Link
+              to="/admin/admins"
+              className={`admin__nav-link${location.pathname === '/admin/admins' ? ' admin__nav-link--active' : ''}`}
+            >
+              Manage admins
+            </Link>
+          )}
           {ADMIN_NAV.map(({ to, label, isEnd }) => {
             const isActive = isEnd ? location.pathname === to : location.pathname.startsWith(to);
 

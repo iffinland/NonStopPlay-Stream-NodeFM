@@ -136,7 +136,7 @@ export function usePlaylists(): UsePlaylistsResult {
 
   const throwIfNoName = () => {
     if (!publisherName || !ownerAddress) {
-      throw new Error('A registered Qortium name and owner account are required.');
+      throw new Error('A registered Qortal name and owner account are required.');
     }
   };
 

@@ -49,7 +49,7 @@ describe('listener playlist submission model', () => {
         versionId: 'v1',
         versionRef: { service: 'JSON', name: 'listener-a', identifier: 'id' },
       }),
-    ).toThrow(/registered Qortium name/);
+    ).toThrow(/registered Qortal name/);
 
     expect(() =>
       createListenerPlaylistSubmission({

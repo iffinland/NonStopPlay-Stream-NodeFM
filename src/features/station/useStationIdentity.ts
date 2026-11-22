@@ -20,10 +20,10 @@ export type StationIdentity = {
 
 export function useStationIdentity(): StationIdentity {
   const { auth } = useAuth();
-  const { station, publisherName: configuredPublisher } = useStation();
+  const { station, publisherName: configuredPublisher, registeredOwnerAddress } = useStation();
   const userAddress = auth.status === 'authenticated' ? auth.address : null;
 
-  const ownerAddress = station?.ownerAddress?.trim() || userAddress;
+  const ownerAddress = station?.ownerAddress?.trim() || registeredOwnerAddress || userAddress;
   const publisherName =
     station?.publisherName?.trim() ||
     configuredPublisher?.trim() ||
