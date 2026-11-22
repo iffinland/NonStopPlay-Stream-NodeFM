@@ -1,5 +1,18 @@
 # NodeFM Station
 
+## Qortal port workspace
+
+This is the Qortal adaptation workspace:
+<https://github.com/iffinland/NonStopPlay-Stream-NodeFM>.
+Source was imported from Qortium NodeFM commit
+`654d17f30065ed7a5c3ce0579ae386180128a5a0`; runtime conversion has not started.
+The Qortium upstream remains unchanged.
+
+Read the [Qortal compatibility audit and implementation phases](docs/QORTAL-PORT-AUDIT.md)
+for current status, verified Core/Hub contracts and the effort estimate.
+The remaining description/specifications describe the imported Qortium baseline
+until the corresponding port phases update them.
+
 NodeFM is a Qortium-native scheduled 24/7 Auto-DJ radio dApp. A listener joins
 the deterministic broadcast position derived from current time, schedule,
 immutable playlist versions, verified track durations, and default rotation;

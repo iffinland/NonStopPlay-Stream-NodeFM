@@ -1,21 +1,25 @@
-# NodeFM Station — Agent Entry Point
+# NodeFM — Qortal port
 
-Before substantial work, follow the canonical Qortium session router:
+Working repository: https://github.com/iffinland/NonStopPlay-Stream-NodeFM
 
-`/home/iffi/VsCodec-Projects/Qortium/qortium-dev-workspace/agents/00-SESSION-START.md`
+The Qortium upstream https://github.com/iffinland/nodefm-station is read-only.
+Never push to it. Preserve this target repository's Git history.
 
-Then read the project context:
+Read `docs/QORTAL-PORT-AUDIT.md` before porting. The copied Qortium
+specifications describe upstream behavior; they do not override this project's
+Qortal scope or the owner's current instructions. References to the owner's
+local Qortium workspace are historical, not prerequisites for working here.
 
-`/home/iffi/VsCodec-Projects/Qortium/qortium-dev-workspace/projects/nodefm-station.md`
+Preserve the deterministic timeline, scheduling, player and domain model.
+Replace platform boundaries using verified Qortal contracts. Do not restore the
+old target implementation as the architecture foundation.
 
-Read only the durable specifications routed by the task. Current source and the
-canonical project context supersede the retired local `agents/` rules and
-completed Phase 1 bootstrap prompt. Never use old Q-Music/Qortal code as the
-NodeFM architecture foundation.
+Keep work reports in `reports/`; durable specs/operator documentation in `docs/`.
+Inspect Git status and relevant build/tools before each phase. Run meaningful
+affected tests and required build, lint and formatting checks.
 
-Store AI work reports under:
-
-`/home/iffi/VsCodec-Projects/Qortium/docs/nodefm-station/`
-
-Preserve existing owner changes. Do not commit, push, publish, deploy, sign,
-transact, tag, or release without explicit owner authorization.
+Deliver test ZIPs for owner runtime verification. Do not commit/push conversion
+iterations until explicitly authorized. Final main publication, tags, release,
+deployment and QDN transactions require explicit owner authorization. The
+initial import and audit were authorized separately; that does not authorize
+releasing an untested conversion.
